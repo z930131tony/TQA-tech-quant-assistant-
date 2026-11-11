@@ -4,7 +4,7 @@
 import yfinance as yf
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 import os
 
@@ -114,9 +114,19 @@ class TechDataLoader:
                     if df_cache.index[-1].date() < benchmark_latest_date.date():
                         cache_lagging = True
 
-                mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
-                # 只有在快取未落後於基準日期、且為當日產生、資料行數足夠時，才允許命中快取
-                if not cache_lagging and mtime.date() == datetime.now().date() and len(df_cache) >= min_rows:
+                # 同日快取時效校驗：
+                # 若為台股且當前台灣時間已過 13:40，但快取檔案修改時間早於當日 13:40，視為過期舊快取，強制重新向 API 下載
+                tw_tz = timezone(timedelta(hours=8))
+                now_tw = datetime.now(tw_tz)
+                mtime_tw = datetime.fromtimestamp(os.path.getmtime(cache_file), tz=tw_tz)
+                is_tw_ticker = (".TW" in ticker) or (".TWO" in ticker)
+                if is_tw_ticker:
+                    cutoff_tw = now_tw.replace(hour=13, minute=40, second=0, microsecond=0)
+                    if now_tw >= cutoff_tw and mtime_tw < cutoff_tw:
+                        cache_lagging = True
+
+                # 只有在快取未落後且非過期、且為當日產生、資料行數足夠時，才允許命中快取
+                if not cache_lagging and mtime_tw.date() == now_tw.date() and len(df_cache) >= min_rows:
                     return df_cache
             except Exception:
                 pass

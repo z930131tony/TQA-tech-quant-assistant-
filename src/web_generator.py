@@ -1171,7 +1171,7 @@ class WebDashboardGenerator:
         if not filtered:
             return """
             <div style="background: #182238; border: 1px dashed #243049; border-radius: 10px; padding: 20px; text-align: center; color: #64748b;">
-                目前尚未設定自訂持股。可透過 Google Sheets 雲端試算表或 <code>portfolio.json</code> 同步您的庫存標的。
+                目前尚未設定自訂持股。可透過 Google Sheets 雲端試算表或 <code>portfolio.json</code> 新增您的庫存標的。
             </div>
             """
 
@@ -1190,13 +1190,17 @@ class WebDashboardGenerator:
             else:
                 pnl_str = f"({pnl_sign}${abs(pnl_val):,.2f})"
             
+            # 股數格式化：整數顯示 int，非整數顯示有效位數 :g
+            shares_val = p.get("shares", 0)
+            shares_str = f"{int(shares_val)}" if float(shares_val).is_integer() else f"{shares_val:g}"
+
             badge_html = f'<span class="badge badge-bear" style="background:#450a0a; color:#f87171; border:1px solid #991b1b;">⚠️ {p.get("alert_text", "")}</span>' if p.get("has_alert") else '<span class="badge badge-bull">✅ 續抱中</span>'
             
             row = f"""
             <tr class="clickable" onclick="openStockModal('{p.get('ticker')}')">
                 <td>
                     <div style="font-weight:bold; color:#f1f5f9;">{p.get('name')}</div>
-                    <div style="font-size:12px; color:#64748b; font-family:monospace;">{p.get('ticker')} ({int(p.get('shares', 0))} 股)</div>
+                    <div style="font-size:12px; color:#64748b; font-family:monospace;">{p.get('ticker')} ({shares_str} 股)</div>
                 </td>
                 <td class="text-right font-mono">{prefix}{p.get('cost_price', 0.0):,.2f}</td>
                 <td class="text-right font-mono" style="font-weight:bold;">{prefix}{p.get('curr_price', 0.0):,.2f}</td>

@@ -106,35 +106,77 @@ class AutoTrader:
                 kept_positions.append(pos)
 
         # ----------------------------------------------------
-        # 步驟 2: 檢查市場環境與買進新標的 (Top 3)
+        # 步驟 2: 檢查市場環境與買進新標的 (Top 3 站上 50MA 強勢標的)
+        # 限制單一市場最多持有 3 檔，若跌出前 5 名且有更強標的則自動換股
         # ----------------------------------------------------
         # 2A. 台股市場
         if target_market in ["ALL", "TW"]:
-            tw_top3 = tw_rank.head(3)
-            tw_bull_count = tw_top3["above_50sma"].sum()
+            tw_top3_raw = tw_rank.head(3)
+            tw_bull_count = tw_top3_raw["above_50sma"].sum() if not tw_top3_raw.empty else 0
             if tw_bull_count >= 2:
-                # 多頭攻擊：買進未持有的前 3 強
-                for _, row in tw_top3.iterrows():
+                tw_candidates = tw_rank[tw_rank["above_50sma"] == True].head(3)
+                tw_top5_tickers = set(tw_rank.head(5)["ticker"])
+                
+                for _, row in tw_candidates.iterrows():
                     t = row["ticker"]
-                    if t not in current_tickers and row["above_50sma"]:
-                        px = float(row["price"])
-                        shares = max(1, int(self.budget_tw / px))
-                        name = TECH_UNIVERSE_TW.get(t, t)
-                        kept_positions.append({
-                            "ticker": t,
-                            "shares": shares,
-                            "cost_price": px,
-                            "entry_date": today_str
-                        })
-                        current_tickers.add(t)
-                        trade_logs.append(f"🟢 【模擬買進委託】{name} ({t})\n   └ 股數: {shares} 股 (零股委託)\n   └ 進場價: NT${px:,.2f} (預算約 NT${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
+                    current_held_tickers = set(p["ticker"] for p in kept_positions)
+                    if t in current_held_tickers:
+                        continue
+                    
+                    # 統計目前台股持倉
+                    curr_tw_positions = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
+                    if len(curr_tw_positions) >= 3:
+                        # 檢查是否有持股已跌出前 5 名
+                        out_of_top5 = [p for p in curr_tw_positions if p["ticker"] not in tw_top5_tickers]
+                        if out_of_top5:
+                            # 挑選排名最落後的標的執行換股平倉
+                            def get_tw_rank_idx(sym):
+                                idxs = tw_rank.index[tw_rank["ticker"] == sym].tolist()
+                                return idxs[0] if idxs else 999
+                            out_of_top5.sort(key=lambda p: get_tw_rank_idx(p["ticker"]), reverse=True)
+                            swap_out = out_of_top5[0]
+                            kept_positions.remove(swap_out)
+                            
+                            s_ticker = swap_out["ticker"]
+                            s_shares = swap_out["shares"]
+                            s_cost = swap_out["cost_price"]
+                            s_name = TECH_UNIVERSE_TW.get(s_ticker, s_ticker)
+                            s_df = self.dataset.get(s_ticker)
+                            s_px = float(s_df["close"].iloc[-1]) if s_df is not None and not s_df.empty else s_cost
+                            s_ret = ((s_px - s_cost) / s_cost) * 100
+                            s_pnl = (s_px - s_cost) * s_shares
+                            
+                            trade_logs.append(
+                                f"🔄 【調倉換股平倉】{s_name} ({s_ticker})\n"
+                                f"   └ 原因: 跌出動能前5名 (目前排名 #{get_tw_rank_idx(s_ticker)+1})，由更強標的 {TECH_UNIVERSE_TW.get(t, t)} ({t}) 替換\n"
+                                f"   └ 平倉價: NT${s_px:,.2f} (報酬率: {s_ret:+.2f}%, 損益: NT${s_pnl:+,.0f})"
+                            )
+                        else:
+                            # 現有 3 檔皆在前 5 強內，不強行換股
+                            continue
+                            
+                    px = float(row["price"])
+                    shares = max(1, int(self.budget_tw / px))
+                    name = TECH_UNIVERSE_TW.get(t, t)
+                    kept_positions.append({
+                        "ticker": t,
+                        "shares": shares,
+                        "cost_price": px,
+                        "entry_date": today_str
+                    })
+                    trade_logs.append(
+                        f"🟢 【模擬買進委託】{name} ({t})\n"
+                        f"   └ 股數: {shares} 股 (零股委託)\n"
+                        f"   └ 進場價: NT${px:,.2f} (預算約 NT${shares * px:,.0f})\n"
+                        f"   └ 依據: 站上50MA強勢入選 (評分: {row['score']:.1f})"
+                    )
             else:
                 trade_logs.append("🛡️ 【台股風控保護】目前台股前三強僅 1 檔站上 50MA，處於保守防禦模式，今日不開新倉。")
 
         # 2B. 美股市場
         if target_market in ["ALL", "US"]:
-            us_top3 = us_rank.head(3)
-            us_bull_count = us_top3["above_50sma"].sum()
+            us_top3_raw = us_rank.head(3)
+            us_bull_count = us_top3_raw["above_50sma"].sum() if not us_top3_raw.empty else 0
             qqq_df = self.dataset.get("QQQ")
             qqq_bull = True
             if qqq_df is not None and not qqq_df.empty:
@@ -143,19 +185,56 @@ class AutoTrader:
                 qqq_bull = (q_close >= q_sma200)
 
             if us_bull_count >= 2 and qqq_bull:
-                for _, row in us_top3.iterrows():
+                us_candidates = us_rank[us_rank["above_50sma"] == True].head(3)
+                us_top5_tickers = set(us_rank.head(5)["ticker"])
+                
+                for _, row in us_candidates.iterrows():
                     t = row["ticker"]
-                    if t not in current_tickers and row["above_50sma"]:
-                        px = float(row["price"])
-                        shares = max(1, int(self.budget_us / px))
-                        kept_positions.append({
-                            "ticker": t,
-                            "shares": shares,
-                            "cost_price": px,
-                            "entry_date": today_str
-                        })
-                        current_tickers.add(t)
-                        trade_logs.append(f"🟢 【模擬買進委託】{t} (美股)\n   └ 股數: {shares} 股\n   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
+                    current_held_tickers = set(p["ticker"] for p in kept_positions)
+                    if t in current_held_tickers:
+                        continue
+                    
+                    curr_us_positions = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
+                    if len(curr_us_positions) >= 3:
+                        out_of_top5 = [p for p in curr_us_positions if p["ticker"] not in us_top5_tickers]
+                        if out_of_top5:
+                            def get_us_rank_idx(sym):
+                                idxs = us_rank.index[us_rank["ticker"] == sym].tolist()
+                                return idxs[0] if idxs else 999
+                            out_of_top5.sort(key=lambda p: get_us_rank_idx(p["ticker"]), reverse=True)
+                            swap_out = out_of_top5[0]
+                            kept_positions.remove(swap_out)
+                            
+                            s_ticker = swap_out["ticker"]
+                            s_shares = swap_out["shares"]
+                            s_cost = swap_out["cost_price"]
+                            s_df = self.dataset.get(s_ticker)
+                            s_px = float(s_df["close"].iloc[-1]) if s_df is not None and not s_df.empty else s_cost
+                            s_ret = ((s_px - s_cost) / s_cost) * 100
+                            s_pnl = (s_px - s_cost) * s_shares
+                            
+                            trade_logs.append(
+                                f"🔄 【調倉換股平倉】{s_ticker} (美股)\n"
+                                f"   └ 原因: 跌出動能前5名 (目前排名 #{get_us_rank_idx(s_ticker)+1})，由更強標的 {t} 替換\n"
+                                f"   └ 平倉價: ${s_px:,.2f} (報酬率: {s_ret:+.2f}%, 損益: ${s_pnl:+,.2f})"
+                            )
+                        else:
+                            continue
+                            
+                    px = float(row["price"])
+                    shares = max(1, int(self.budget_us / px))
+                    kept_positions.append({
+                        "ticker": t,
+                        "shares": shares,
+                        "cost_price": px,
+                        "entry_date": today_str
+                    })
+                    trade_logs.append(
+                        f"🟢 【模擬買進委託】{t} (美股)\n"
+                        f"   └ 股數: {shares} 股\n"
+                        f"   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n"
+                        f"   └ 依據: 站上50MA強勢入選 (評分: {row['score']:.1f})"
+                    )
             else:
                 trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
 

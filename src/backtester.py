@@ -200,7 +200,7 @@ class TechBacktester:
 
                 # 大盤大空頭總避險濾網 (Market Regime Filter)
                 # 台股：前三強需有至少 2 檔站上 50MA（領頭群健康發動）
-                # 美股：QQQ 大盤指數需高於 200MA 年線（大趨勢多頭）
+                # 美股：前三強需有至少 2 檔站上 50MA 且 QQQ 大盤指數需高於 200MA 年線（大趨勢多頭）
                 is_market_bull = True
                 if market == "TW":
                     all_scores = []
@@ -212,12 +212,27 @@ class TechBacktester:
                     all_scores.sort(key=lambda x: x[1], reverse=True)
                     top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
                     is_market_bull = (top3_bull_count >= 2)
-                elif market == "US" and "QQQ" in self.dataset:
+                elif market == "US":
+                    # 1. 檢查美股前 3 強至少 2 檔站上 50MA (與 trader.py / web_generator.py 100% 一致)
+                    all_scores = []
+                    for t, d in filtered_data.items():
+                        if current_date in d.index:
+                            r = d.loc[current_date]
+                            sc = float(r["momentum_score"]) if not np.isnan(r["momentum_score"]) else -999.0
+                            all_scores.append((t, sc, bool(r["above_50sma"])))
+                    all_scores.sort(key=lambda x: x[1], reverse=True)
+                    top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
+                    us_leaders_bull = (top3_bull_count >= 2)
+
+                    # 2. 檢查 QQQ >= 200MA
+                    qqq_bull = True
                     q_df = filtered_data.get("QQQ", self.dataset.get("QQQ"))
                     if q_df is not None and current_date in q_df.index:
                         q_c = float(q_df.loc[current_date, "close"])
                         q_sma = float(q_df.loc[current_date, "sma_200"]) if "sma_200" in q_df.columns else float(q_df["close"].rolling(200).mean().loc[current_date])
-                        is_market_bull = (q_c >= q_sma) if not np.isnan(q_sma) else True
+                        qqq_bull = (q_c >= q_sma) if not np.isnan(q_sma) else True
+
+                    is_market_bull = (us_leaders_bull and qqq_bull)
 
                 if not is_market_bull:
                     # 大盤轉入空頭防禦期：不開新倉，保留 100% 現金防禦
@@ -351,12 +366,13 @@ class TechBacktester:
         vol = perf_df["daily_return"].std() * np.sqrt(252)
         sharpe = (mean_ret - 0.02) / (vol + 1e-9)
         
-        # 交易統計
+        # 交易統計 (僅針對 SELL 平倉交易計算勝率，排除 BUY 委託稀釋分母)
         trades_df = pd.DataFrame(trade_logs)
         win_rate = 0.0
-        if not trades_df.empty and "pnl" in trades_df.columns:
-            profitable = (trades_df["pnl"] > 0).sum()
-            win_rate = (profitable / len(trades_df)) * 100
+        sell_trades = trades_df[trades_df["action"] == "SELL"] if not trades_df.empty and "action" in trades_df.columns else pd.DataFrame()
+        if not sell_trades.empty and "pnl" in sell_trades.columns:
+            profitable = (sell_trades["pnl"] > 0).sum()
+            win_rate = (profitable / len(sell_trades)) * 100
 
         # 計算基準報酬 (台股 0052.TW，美股 QQQ)
         bench_ticker = "0050.TW" if market == "TW" else "QQQ"
