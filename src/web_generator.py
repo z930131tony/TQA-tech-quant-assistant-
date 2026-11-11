@@ -16,6 +16,7 @@ import numpy as np
 from typing import Dict, Optional
 from src.config import TECH_UNIVERSE_TW
 from src.portfolio import PortfolioTracker
+from src.mascot_data import MASCOT_BASE64
 
 RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-TW">
@@ -139,6 +140,70 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         
         .btn-link { display: block; width: 100%; padding: 12px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 12px; transition: background 0.15s; }
         .btn-link:hover { background: #1d4ed8; }
+
+        /* 🐣 吉祥物 (小黃雞桌寵) 視窗邊緣巡邏樣式 */
+        .mascot-container {
+            position: fixed;
+            bottom: 12px;
+            left: 10px;
+            z-index: 45;
+            pointer-events: none;
+            user-select: none;
+            transition: transform 0.08s linear;
+        }
+        .mascot-avatar {
+            width: 58px;
+            height: 63px;
+            cursor: pointer;
+            pointer-events: auto;
+            filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.45));
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            display: block;
+        }
+        .mascot-avatar:hover {
+            transform: scale(1.18) !important;
+        }
+        .mascot-avatar:active {
+            transform: scale(0.9) !important;
+        }
+        .mascot-bubble {
+            position: absolute;
+            bottom: 70px;
+            left: 50%;
+            transform: translateX(-50%) scale(0);
+            transform-origin: bottom center;
+            background: #182238;
+            border: 1px solid #38bdf8;
+            color: #f8fafc;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 6px 12px;
+            border-radius: 12px;
+            white-space: nowrap;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+            opacity: 0;
+            transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: none;
+            z-index: 46;
+        }
+        .mascot-bubble::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-width: 6px 6px 0;
+            border-style: solid;
+            border-color: #38bdf8 transparent transparent transparent;
+        }
+        .mascot-bubble.show {
+            transform: translateX(-50%) scale(1);
+            opacity: 1;
+        }
+        @media (max-width: 640px) {
+            .mascot-avatar { width: 48px; height: 52px; }
+            .mascot-bubble { bottom: 58px; font-size: 11px; }
+        }
         
         .hidden { display: none !important; }
     </style>
@@ -388,6 +453,12 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 開啟外部詳細報價 ↗
             </a>
         </div>
+    </div>
+
+    <!-- 🐣 吉祥物桌寵 (視窗邊緣巡邏伴讀) -->
+    <div id="mascot-box" class="mascot-container">
+        <div id="mascot-bubble" class="mascot-bubble">摸摸我！看多不追高 🐣</div>
+        <img id="mascot-img" class="mascot-avatar" onclick="petMascot()" src="data:image/png;base64,__MASCOT_BASE64__" alt="TQA 吉祥物" title="點我摸摸！">
     </div>
 
     <script>
@@ -744,6 +815,92 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 checkCloudUpdates();
             }
         });
+
+        // ================= 🐣 吉祥物 (小黃雞桌寵) 視窗邊緣巡邏邏輯 =================
+        const mascotBox = document.getElementById('mascot-box');
+        const mascotImg = document.getElementById('mascot-img');
+        const mascotBubble = document.getElementById('mascot-bubble');
+
+        let posX = 20;
+        let speed = 1.0;
+        let direction = 1; // 1: 向右, -1: 向左
+        let isIdling = false;
+        let bubbleTimer = null;
+        let stepCount = 0;
+
+        const MASCOT_QUOTES = [
+            "跌破 50MA 絕不戀戰！",
+            "自高點回檔 8% 移動停利停損！",
+            "抱牢趨勢大波段，不被盤中洗掉 🐣",
+            "今天你的自訂持股都在多頭軌道嗎？",
+            "大戶投現貨 / 零股安心定錨！",
+            "我是 TQA 守護小吉祥物，陪你看盤！",
+            "看多不追高，拉回守均線 🚀",
+            "摸摸我！祝你今天手上的股票漲不停 🎉"
+        ];
+
+        function wanderMascot() {
+            if (!isIdling && mascotBox && mascotImg) {
+                const maxX = window.innerWidth - (window.innerWidth < 640 ? 65 : 80);
+                posX += speed * direction;
+                stepCount++;
+
+                // 碰到邊緣自動轉向
+                if (posX >= maxX) {
+                    posX = maxX;
+                    direction = -1;
+                    mascotImg.style.transform = 'scaleX(-1)';
+                } else if (posX <= 15) {
+                    posX = 15;
+                    direction = 1;
+                    mascotImg.style.transform = 'scaleX(1)';
+                }
+
+                // 隨機停下來休息發呆一下
+                if (Math.random() < 0.003 && stepCount > 120) {
+                    stepCount = 0;
+                    isIdling = true;
+                    mascotImg.style.transition = 'transform 0.4s ease';
+                    mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ' scale(1.06, 0.94)';
+                    setTimeout(() => {
+                        isIdling = false;
+                        mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)');
+                    }, 2200 + Math.random() * 2000);
+                }
+
+                // 走路微搖擺動畫 (Waddle)
+                const waddle = Math.sin(Date.now() / 150) * 4.5;
+                mascotBox.style.transform = `translateX(${posX}px)`;
+                if (!isIdling) {
+                    mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ` rotate(${waddle}deg)`;
+                }
+            }
+
+            requestAnimationFrame(wanderMascot);
+        }
+
+        // 點擊互動跳躍 + 說話
+        function petMascot() {
+            if (!mascotImg || !mascotBubble) return;
+            mascotImg.style.transition = 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)';
+            mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ' translateY(-26px) scale(1.22)';
+            
+            const quote = MASCOT_QUOTES[Math.floor(Math.random() * MASCOT_QUOTES.length)];
+            mascotBubble.innerText = quote;
+            mascotBubble.classList.add('show');
+
+            setTimeout(() => {
+                mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)');
+            }, 300);
+
+            clearTimeout(bubbleTimer);
+            bubbleTimer = setTimeout(() => {
+                mascotBubble.classList.remove('show');
+            }, 3500);
+        }
+
+        // 啟動巡邏
+        requestAnimationFrame(wanderMascot);
     </script>
 </body>
 </html>
@@ -961,6 +1118,7 @@ class WebDashboardGenerator:
         html = html.replace("__US_PORTFOLIO__", us_portfolio_html)
 
         html = html.replace("__STOCKS_DATABASE_JSON__", stocks_db_json)
+        html = html.replace("__MASCOT_BASE64__", MASCOT_BASE64)
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
