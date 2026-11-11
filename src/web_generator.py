@@ -1,5 +1,5 @@
 """
-極速行動端儀表板生成模組 (去除 CDN 編譯負擔、極速純 CSS、圖表零延遲更新)
+極速響應式自適應儀表板生成模組 (手機舒適流暢、電腦寬螢幕雙欄自適應排版)
 """
 import os
 import json
@@ -9,8 +9,7 @@ import numpy as np
 from typing import Dict
 from src.config import TECH_UNIVERSE_TW
 
-# 採用極致精簡的純 CSS，無需載入任何外部 CSS/JIT 編譯器，首屏載入快 10 倍
-FAST_HTML_TEMPLATE = """<!DOCTYPE html>
+RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -19,77 +18,98 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 40px; }
-        .container { max-width: 680px; margin: 0 auto; padding: 12px; }
+        body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 50px; }
         
-        /* 頂部列 */
-        header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
-        .title { font-size: 15px; font-weight: bold; color: #f8fafc; }
-        .subtitle { font-size: 10px; color: #94a3b8; }
-        .update-time { font-size: 10px; font-family: monospace; color: #cbd5e1; }
+        /* 全域容器自適應 */
+        .container { width: 100%; max-width: 1280px; margin: 0 auto; padding: 12px 16px; }
+        
+        /* 頂部導覽列 */
+        header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header-left { display: flex; align-items: center; gap: 12px; }
+        .logo-tag { background: #2563eb; color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-mono; }
+        .title { font-size: 17px; font-weight: bold; color: #f8fafc; }
+        .subtitle { font-size: 12px; color: #94a3b8; }
+        .update-box { text-align: right; }
+        .update-label { font-size: 10px; color: #64748b; }
+        .update-time { font-size: 12px; font-family: monospace; color: #cbd5e1; }
         
         /* 分頁切換 */
-        .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 12px 0; }
-        .tab-btn { flex: 1; padding: 10px; background: none; border: none; color: #64748b; font-size: 14px; font-weight: 500; cursor: pointer; text-align: center; }
-        .tab-btn.active { color: #38bdf8; border-bottom: 2px solid #38bdf8; font-weight: 600; }
+        .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 16px 0 20px 0; }
+        .tab-btn { flex: 1; max-width: 200px; padding: 12px; background: none; border: none; color: #64748b; font-size: 15px; font-weight: 500; cursor: pointer; text-align: center; }
+        .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; font-weight: bold; }
+        
+        /* 電腦端雙欄自適應佈局 (手機單欄、電腦左右分欄) */
+        .desktop-grid { display: flex; flex-direction: column; gap: 16px; }
+        @media (min-width: 960px) {
+            .desktop-grid { display: grid; grid-template-columns: 400px 1fr; gap: 20px; align-items: start; }
+        }
         
         /* 卡片容器 */
-        .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-        .card-title { font-size: 12px; font-weight: 600; color: #cbd5e1; }
-        .data-date { font-size: 11px; color: #64748b; margin-bottom: 10px; }
+        .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .card-title { font-size: 13px; font-weight: bold; color: #cbd5e1; }
+        .data-date { font-size: 12px; color: #64748b; margin-bottom: 12px; }
         
         /* 狀態徽章 */
-        .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+        .badge { font-size: 11px; padding: 3px 10px; border-radius: 4px; font-weight: 600; font-family: monospace; }
         .badge-bull { background: #064e3b; color: #34d399; border: 1px solid #059669; }
         .badge-bear { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
         
         /* 推薦股票項目 (點擊瞬間反饋) */
-        .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #182238; border: 1px solid #243049; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
-        .stock-item:active { background: #222f4c; transform: scale(0.99); }
-        .stock-left { display: flex; align-items: center; gap: 10px; }
-        .rank-num { width: 22px; height: 22px; background: #28354f; color: #cbd5e1; font-size: 11px; font-weight: bold; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
-        .stock-name { font-size: 13px; font-weight: bold; color: #f1f5f9; }
-        .stock-sub { font-size: 11px; color: #94a3b8; font-family: monospace; }
+        .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: #182238; border: 1px solid #243049; border-radius: 8px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s; }
+        .stock-item:hover { background: #1f2b45; border-color: #38bdf8; }
+        .stock-item:active { transform: scale(0.99); }
+        .stock-left { display: flex; align-items: center; gap: 12px; }
+        .rank-num { width: 26px; height: 26px; background: #28354f; color: #cbd5e1; font-size: 12px; font-weight: bold; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
+        .stock-name { font-size: 14px; font-weight: bold; color: #f1f5f9; }
+        .stock-sub { font-size: 12px; color: #94a3b8; font-family: monospace; margin-top: 2px; }
         
         /* 回測數據網格 */
-        .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; font-family: monospace; }
-        @media (max-width: 480px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
-        .grid-item { background: #182238; padding: 8px; border-radius: 6px; border: 1px solid #1e293b; }
-        .grid-label { font-size: 10px; color: #64748b; margin-bottom: 2px; }
-        .grid-val { font-size: 15px; font-weight: bold; }
+        .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; text-align: center; font-family: monospace; }
+        @media (min-width: 480px) and (max-width: 959px) { .grid-4 { grid-template-columns: repeat(4, 1fr); } }
+        .grid-item { background: #182238; padding: 10px; border-radius: 8px; border: 1px solid #1e293b; }
+        .grid-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
+        .grid-val { font-size: 16px; font-weight: bold; }
         
-        /* 表格樣式 */
+        /* 表格樣式 (電腦版寬螢幕更舒適) */
         .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        th { text-align: left; padding: 8px 6px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 500; }
-        td { padding: 9px 6px; border-bottom: 1px solid #182238; }
-        tr.clickable { cursor: pointer; }
-        tr.clickable:active { background: #1e293b; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 10px 8px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; }
+        td { padding: 12px 8px; border-bottom: 1px solid #182238; }
+        tr.clickable { cursor: pointer; transition: background 0.1s; }
+        tr.clickable:hover { background: #1a253c; }
+        tr.clickable:active { background: #202e4a; }
         .text-right { text-align: right; }
         .text-center { text-align: center; }
         .font-mono { font-family: monospace; }
         .green { color: #34d399; }
         .red { color: #f87171; }
         
-        /* 彈窗樣式 (完全無毛玻璃濾鏡，GPU零負擔秒開) */
-        .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.8); display: none; align-items: flex-end; justify-content: center; }
-        @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 16px; } }
-        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 16px 16px 0 0; width: 100%; max-width: 540px; padding: 16px; max-height: 85vh; overflow-y: auto; }
-        @media (min-width: 640px) { .modal-box { border-radius: 14px; } }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 10px; margin-bottom: 12px; }
-        .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 16px; }
+        /* 電腦專用欄位在手機隱藏 */
+        .desktop-only { display: none; }
+        @media (min-width: 768px) { .desktop-only { display: table-cell; } }
         
-        /* 圖表高度容器 */
-        .chart-box { height: 210px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; padding: 6px; margin: 10px 0; }
+        /* 彈窗樣式 (自適應：手機貼底、電腦置中大畫面) */
+        .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.75); display: none; align-items: flex-end; justify-content: center; }
+        @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 20px; } }
+        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 16px 16px 0 0; width: 100%; max-width: 680px; padding: 20px; max-height: 90vh; overflow-y: auto; }
+        @media (min-width: 640px) { .modal-box { border-radius: 16px; } }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 14px; }
+        .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+        .close-btn:hover { background: #334155; color: #fff; }
         
-        /* 因子網格 */
-        .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 10px 0; text-align: center; font-family: monospace; }
-        .factor-card { background: #182238; border: 1px solid #23304a; border-radius: 6px; padding: 6px 4px; }
+        /* 圖表高度自適應 (電腦版 280px 大圖更清晰) */
+        .chart-box { height: 220px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; padding: 8px; margin: 12px 0; }
+        @media (min-width: 640px) { .chart-box { height: 280px; } }
+        
+        /* 因子網格自適應 (手機 3 欄、電腦 6 欄一字排開) */
+        .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; text-align: center; font-family: monospace; }
+        @media (min-width: 640px) { .factor-grid { grid-template-columns: repeat(6, 1fr); } }
+        .factor-card { background: #182238; border: 1px solid #23304a; border-radius: 8px; padding: 8px 4px; }
         
         /* 外開按鈕 */
-        .btn-link { display: block; width: 100%; padding: 10px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 13px; font-weight: 600; margin-top: 12px; }
-        .btn-link:active { background: #1d4ed8; }
+        .btn-link { display: block; width: 100%; padding: 12px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 14px; transition: background 0.15s; }
+        .btn-link:hover { background: #1d4ed8; }
         
         .hidden { display: none !important; }
     </style>
@@ -97,12 +117,15 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
 <body>
 
     <header>
-        <div>
-            <div class="title">TQA 科技量化策略</div>
-            <div class="subtitle">大戶投現貨 / 複委託波段輪動</div>
+        <div class="header-left">
+            <span class="logo-tag">QUANT</span>
+            <div>
+                <div class="title">TQA 科技量化策略</div>
+                <div class="subtitle">大戶投現貨 / 複委託波段輪動</div>
+            </div>
         </div>
-        <div style="text-align: right;">
-            <div style="font-size: 9px; color: #64748b;">最後更新</div>
+        <div class="update-box">
+            <div class="update-label">數據更新</div>
             <div class="update-time">__UPDATE_TIME__</div>
         </div>
     </header>
@@ -110,118 +133,134 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="container">
         <!-- 分頁切換 -->
         <div class="tabs">
-            <button onclick="switchTab('tw')" id="tab-tw" class="tab-btn active">台股焦點</button>
-            <button onclick="switchTab('us')" id="tab-us" class="tab-btn">美股焦點</button>
+            <button onclick="switchTab('tw')" id="tab-tw" class="tab-btn active">🇹🇼 台股焦點</button>
+            <button onclick="switchTab('us')" id="tab-us" class="tab-btn">🇺🇸 美股焦點</button>
         </div>
 
         <!-- ================= 台股 ================= -->
         <div id="content-tw">
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">大戶投操作指引</span>
-                    <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
-                </div>
-                <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看走勢圖)</div>
-                <div>__TW_RECOMMENDATIONS__</div>
-            </div>
+            <div class="desktop-grid">
+                <!-- 左欄：操作指引與回測績效 -->
+                <div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">大戶投操作指引</span>
+                            <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
+                        </div>
+                        <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看走勢圖)</div>
+                        <div>__TW_RECOMMENDATIONS__</div>
+                    </div>
 
-            <div class="card">
-                <div class="card-title" style="margin-bottom: 8px;">歷史回測績效 (2024 - 2026)</div>
-                <div class="grid-4">
-                    <div class="grid-item">
-                        <div class="grid-label">總報酬率</div>
-                        <div class="grid-val green">__TW_TOTAL_RET__</div>
-                    </div>
-                    <div class="grid-item">
-                        <div class="grid-label">年化報酬 (CAGR)</div>
-                        <div class="grid-val green">__TW_CAGR__</div>
-                    </div>
-                    <div class="grid-item">
-                        <div class="grid-label">同期基準 (0052)</div>
-                        <div class="grid-val red">__TW_BENCHMARK__</div>
-                    </div>
-                    <div class="grid-item">
-                        <div class="grid-label">最大回撤 (MDD)</div>
-                        <div class="grid-val red">__TW_MDD__</div>
+                    <div class="card">
+                        <div class="card-title" style="margin-bottom: 10px;">歷史回測績效 (2024 - 2026)</div>
+                        <div class="grid-4">
+                            <div class="grid-item">
+                                <div class="grid-label">總報酬率</div>
+                                <div class="grid-val green">__TW_TOTAL_RET__</div>
+                            </div>
+                            <div class="grid-item">
+                                <div class="grid-label">年化報酬 (CAGR)</div>
+                                <div class="grid-val green">__TW_CAGR__</div>
+                            </div>
+                            <div class="grid-item">
+                                <div class="grid-label">同期基準 (0052)</div>
+                                <div class="grid-val red">__TW_BENCHMARK__</div>
+                            </div>
+                            <div class="grid-item">
+                                <div class="grid-label">最大回撤 (MDD)</div>
+                                <div class="grid-val red">__TW_MDD__</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="card">
-                <div class="card-title" style="margin-bottom: 8px;">標的評分排序 (點擊列開啟圖表)</div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>排名</th>
-                                <th>標的</th>
-                                <th class="text-right">最新價</th>
-                                <th class="text-right">20日動能</th>
-                                <th class="text-right">綜合分</th>
-                                <th class="text-center">狀態</th>
-                            </tr>
-                        </thead>
-                        <tbody>__TW_TABLE_ROWS__</tbody>
-                    </table>
+                <!-- 右欄：完整天梯排行 -->
+                <div class="card">
+                    <div class="card-title" style="margin-bottom: 10px;">標的評分排序 (點擊列開啟詳細數據與圖表)</div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>排名</th>
+                                    <th>標的名稱</th>
+                                    <th class="text-right">最新價</th>
+                                    <th class="text-right">20日動能</th>
+                                    <th class="text-right desktop-only">60日動能</th>
+                                    <th class="text-right desktop-only">14日RSI</th>
+                                    <th class="text-right">綜合分</th>
+                                    <th class="text-center">狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody>__TW_TABLE_ROWS__</tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- ================= 美股 ================= -->
         <div id="content-us" class="hidden">
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">複委託操作指引</span>
-                    <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
-                </div>
-                <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看走勢圖)</div>
-                <div>__US_RECOMMENDATIONS__</div>
-            </div>
+            <div class="desktop-grid">
+                <!-- 左欄：操作指引與回測績效 -->
+                <div>
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="card-title">複委託操作指引</span>
+                            <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
+                        </div>
+                        <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看走勢圖)</div>
+                        <div>__US_RECOMMENDATIONS__</div>
+                    </div>
 
-            <div class="card">
-                <div class="card-title" style="margin-bottom: 8px;">歷史回測績效 (2024 - 2026)</div>
-                <div class="grid-4">
-                    <div class="grid-item">
-                        <div class="grid-label">總報酬率</div>
-                        <div class="grid-val green">__US_TOTAL_RET__</div>
-                    </div>
-                    <div class="grid-item">
-                        <div class="grid-label">年化報酬 (CAGR)</div>
-                        <div class="grid-val green">__US_CAGR__</div>
-                    </div>
-                    <div class="grid-item">
-                        <div class="grid-label">同期基準 (QQQ)</div>
-                        <div class="grid-val green">__US_BENCHMARK__</div>
-                    </div>
-                    <div class="grid-item">
-                        <div class="grid-label">最大回撤 (MDD)</div>
-                        <div class="grid-val red">__US_MDD__</div>
+                    <div class="card">
+                        <div class="card-title" style="margin-bottom: 10px;">歷史回測績效 (2024 - 2026)</div>
+                        <div class="grid-4">
+                            <div class="grid-item">
+                                <div class="grid-label">總報酬率</div>
+                                <div class="grid-val green">__US_TOTAL_RET__</div>
+                            </div>
+                            <div class="grid-item">
+                                <div class="grid-label">年化報酬 (CAGR)</div>
+                                <div class="grid-val green">__US_CAGR__</div>
+                            </div>
+                            <div class="grid-item">
+                                <div class="grid-label">同期基準 (QQQ)</div>
+                                <div class="grid-val green">__US_BENCHMARK__</div>
+                            </div>
+                            <div class="grid-item">
+                                <div class="grid-label">最大回撤 (MDD)</div>
+                                <div class="grid-val red">__US_MDD__</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="card">
-                <div class="card-title" style="margin-bottom: 8px;">標的評分排序 (點擊列開啟圖表)</div>
-                <div class="table-wrap">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>排名</th>
-                                <th>標的</th>
-                                <th class="text-right">最新價</th>
-                                <th class="text-right">20日動能</th>
-                                <th class="text-right">綜合分</th>
-                                <th class="text-center">狀態</th>
-                            </tr>
-                        </thead>
-                        <tbody>__US_TABLE_ROWS__</tbody>
-                    </table>
+                <!-- 右欄：完整天梯排行 -->
+                <div class="card">
+                    <div class="card-title" style="margin-bottom: 10px;">標的評分排序 (點擊列開啟詳細數據與圖表)</div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>排名</th>
+                                    <th>標的名稱</th>
+                                    <th class="text-right">最新價</th>
+                                    <th class="text-right">20日動能</th>
+                                    <th class="text-right desktop-only">60日動能</th>
+                                    <th class="text-right desktop-only">14日RSI</th>
+                                    <th class="text-right">綜合分</th>
+                                    <th class="text-center">狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody>__US_TABLE_ROWS__</tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <div style="text-align: center; font-size: 11px; color: #475569; margin-top: 16px;">
-            數據來源: Yahoo Finance • 跌破 50MA 或高點拉回 8% 出場
+        <div style="text-align: center; font-size: 12px; color: #475569; margin-top: 24px;">
+            數據來源: Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場
         </div>
     </div>
 
@@ -230,19 +269,19 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="modal-box" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <div>
-                    <span id="modal-name" style="font-size: 16px; font-weight: bold; color: #f8fafc;">-</span>
-                    <span id="modal-symbol" style="font-size: 11px; color: #64748b; font-family: monospace; margin-left: 4px;">-</span>
-                    <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">
-                        收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace;">-</span>
-                        <span id="modal-trend-badge" class="badge" style="margin-left: 6px;">-</span>
+                    <span id="modal-name" style="font-size: 18px; font-weight: bold; color: #f8fafc;">-</span>
+                    <span id="modal-symbol" style="font-size: 12px; color: #64748b; font-family: monospace; margin-left: 6px;">-</span>
+                    <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">
+                        收盤價: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace;">-</span>
+                        <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
                 </div>
                 <button class="close-btn" onclick="closeStockModal()">✕</button>
             </div>
 
             <!-- 圖表 -->
-            <div style="font-size: 11px; color: #64748b; display: flex; justify-content: space-between;">
-                <span>近 60 日走勢 (藍線:股價 / 黃線:50MA)</span>
+            <div style="font-size: 12px; color: #64748b; display: flex; justify-content: space-between;">
+                <span>近 60 日走勢 (藍線: 股價 / 黃線: 50MA 生命線)</span>
             </div>
             <div class="chart-box">
                 <canvas id="modalChart"></canvas>
@@ -251,28 +290,28 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
             <!-- 因子數據 -->
             <div class="factor-grid">
                 <div class="factor-card">
-                    <div style="font-size: 9px; color: #64748b;">20日動能</div>
-                    <div id="modal-roc20" style="font-size: 12px; font-weight: bold;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">20日動能</div>
+                    <div id="modal-roc20" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 9px; color: #64748b;">60日動能</div>
-                    <div id="modal-roc60" style="font-size: 12px; font-weight: bold;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">60日動能</div>
+                    <div id="modal-roc60" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 9px; color: #64748b;">120日動能</div>
-                    <div id="modal-roc120" style="font-size: 12px; font-weight: bold;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">120日動能</div>
+                    <div id="modal-roc120" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 9px; color: #64748b;">50MA乖離</div>
-                    <div id="modal-bias50" style="font-size: 12px; font-weight: bold;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">50MA乖離</div>
+                    <div id="modal-bias50" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 9px; color: #64748b;">14日 RSI</div>
-                    <div id="modal-rsi" style="font-size: 12px; font-weight: bold; color: #cbd5e1;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">14日 RSI</div>
+                    <div id="modal-rsi" style="font-size: 13px; font-weight: bold; color: #cbd5e1;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 9px; color: #64748b;">20日破高</div>
-                    <div id="modal-breakout" style="font-size: 12px; font-weight: bold;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">20日破高</div>
+                    <div id="modal-breakout" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
             </div>
 
@@ -315,10 +354,10 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const trendBadge = document.getElementById('modal-trend-badge');
             if (data.above_50sma) {
-                trendBadge.innerText = '站上 50MA';
+                trendBadge.innerText = '站上 50MA (多頭)';
                 trendBadge.className = 'badge badge-bull';
             } else {
-                trendBadge.innerText = '跌破 50MA';
+                trendBadge.innerText = '跌破 50MA (弱勢)';
                 trendBadge.className = 'badge badge-bear';
             }
 
@@ -347,7 +386,6 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
                 extLink.href = 'https://www.tradingview.com/symbols/' + data.symbol + '/';
             }
 
-            // 更新圖表 (0延遲不卡頓)
             updateChartFast(data);
 
             const modal = document.getElementById('stock-modal');
@@ -376,16 +414,17 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
                             {
                                 data: data.chart_prices,
                                 borderColor: '#38bdf8',
-                                borderWidth: 1.8,
+                                borderWidth: 2,
                                 pointRadius: 0,
+                                pointHoverRadius: 4,
                                 fill: false,
                                 tension: 0.1
                             },
                             {
                                 data: data.chart_sma50,
                                 borderColor: '#fbbf24',
-                                borderWidth: 1.2,
-                                borderDash: [3, 3],
+                                borderWidth: 1.5,
+                                borderDash: [4, 4],
                                 pointRadius: 0,
                                 fill: false,
                                 tension: 0.1
@@ -398,13 +437,12 @@ FAST_HTML_TEMPLATE = """<!DOCTYPE html>
                         animation: false,
                         plugins: { legend: { display: false } },
                         scales: {
-                            x: { grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 5, font: { size: 9 } } },
-                            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 9, family: 'monospace' } } }
+                            x: { grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } } },
+                            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10, family: 'monospace' } } }
                         }
                     }
                 });
             } else {
-                // 直接替換數據，不重新建立實例，瞬間刷新
                 chartInstance.data.labels = data.chart_dates;
                 chartInstance.data.datasets[0].data = data.chart_prices;
                 chartInstance.data.datasets[1].data = data.chart_sma50;
@@ -456,23 +494,28 @@ class WebDashboardGenerator:
             name = row["name"]
             price = row["price"]
             roc20 = row["roc_20d"]
+            roc60 = row["roc_60d"]
+            rsi = row["rsi"]
             score = row["score"]
             above_50 = row["above_50sma"]
 
             roc_class = "green" if roc20 >= 0 else "red"
+            roc60_class = "green" if roc60 >= 0 else "red"
             currency = "NT$" if is_tw else "$"
-            status_badge = '<span class="green">多頭</span>' if above_50 else '<span style="color:#64748b">轉弱</span>'
+            status_badge = '<span class="green" style="font-weight:600">多頭</span>' if above_50 else '<span style="color:#64748b">轉弱</span>'
 
             row_html = f"""
             <tr onclick="openStockModal('{ticker}')" class="clickable">
-                <td class="font-mono" style="color: #64748b;">#{idx+1}</td>
+                <td class="font-mono" style="color: #64748b; font-weight: bold;">#{idx+1}</td>
                 <td>
-                    <div style="font-weight: bold; color: #f1f5f9;">{name}</div>
-                    <div class="font-mono" style="font-size: 10px; color: #64748b;">{ticker}</div>
+                    <div style="font-weight: bold; color: #f1f5f9; font-size: 14px;">{name}</div>
+                    <div class="font-mono" style="font-size: 11px; color: #64748b;">{ticker}</div>
                 </td>
-                <td class="text-right font-mono">{currency}{price:,.2f}</td>
+                <td class="text-right font-mono" style="font-weight: 600;">{currency}{price:,.2f}</td>
                 <td class="text-right font-mono {roc_class}">{roc20:+.2f}%</td>
-                <td class="text-right font-mono" style="font-weight: bold; color: #cbd5e1;">{score:+.1f}</td>
+                <td class="text-right font-mono {roc60_class} desktop-only">{roc60:+.2f}%</td>
+                <td class="text-right font-mono desktop-only" style="color: #cbd5e1;">{rsi:.1f}</td>
+                <td class="text-right font-mono" style="font-weight: bold; color: #38bdf8;">{score:+.1f}</td>
                 <td class="text-center">{status_badge}</td>
             </tr>
             """
@@ -536,7 +579,7 @@ class WebDashboardGenerator:
 
         stocks_json = cls.build_stocks_database_json(dataset)
 
-        html = FAST_HTML_TEMPLATE
+        html = RESPONSIVE_HTML_TEMPLATE
         html = html.replace("__UPDATE_TIME__", now_str)
         html = html.replace("__STOCKS_DATABASE_JSON__", stocks_json)
 
@@ -564,4 +607,4 @@ class WebDashboardGenerator:
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"網頁生成完成：{output_path}")
+        print(f"網頁自適應生成完成：{output_path}")
