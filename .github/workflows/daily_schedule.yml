@@ -37,11 +37,11 @@ jobs:
         run: |
           python run_daily.py
 
-      - name: 提交更新後的 index.html 至 main 分支
+      - name: 提交更新後的檔案至 main 分支
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Actions"
-          git add index.html
+          git add index.html portfolio.json
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore(auto): 自動更新股市數據與儀表板 [skip ci]" && git push origin main)
 
       - name: 自動部署到 GitHub Pages (供手機隨時瀏覽)
