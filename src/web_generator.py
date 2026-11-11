@@ -1,5 +1,5 @@
 """
-極速響應式自適應儀表板生成模組 (手機舒適流暢、電腦寬螢幕雙欄自適應排版)
+極速響應式自適應儀表板生成模組 (具備 X 軸磁吸、手指左右拖曳看盤、頂部 HUD 抬頭顯示與十字準星)
 """
 import os
 import json
@@ -20,42 +20,35 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 50px; }
         
-        /* 全域容器自適應 */
         .container { width: 100%; max-width: 1280px; margin: 0 auto; padding: 12px 16px; }
         
-        /* 頂部導覽列 */
         header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
         .header-left { display: flex; align-items: center; gap: 12px; }
-        .logo-tag { background: #2563eb; color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-mono; }
+        .logo-tag { background: #2563eb; color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
         .title { font-size: 17px; font-weight: bold; color: #f8fafc; }
         .subtitle { font-size: 12px; color: #94a3b8; }
         .update-box { text-align: right; }
         .update-label { font-size: 10px; color: #64748b; }
         .update-time { font-size: 12px; font-family: monospace; color: #cbd5e1; }
         
-        /* 分頁切換 */
         .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 16px 0 20px 0; }
         .tab-btn { flex: 1; max-width: 200px; padding: 12px; background: none; border: none; color: #64748b; font-size: 15px; font-weight: 500; cursor: pointer; text-align: center; }
         .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; font-weight: bold; }
         
-        /* 電腦端雙欄自適應佈局 (手機單欄、電腦左右分欄) */
         .desktop-grid { display: flex; flex-direction: column; gap: 16px; }
         @media (min-width: 960px) {
             .desktop-grid { display: grid; grid-template-columns: 400px 1fr; gap: 20px; align-items: start; }
         }
         
-        /* 卡片容器 */
         .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .card-title { font-size: 13px; font-weight: bold; color: #cbd5e1; }
         .data-date { font-size: 12px; color: #64748b; margin-bottom: 12px; }
         
-        /* 狀態徽章 */
         .badge { font-size: 11px; padding: 3px 10px; border-radius: 4px; font-weight: 600; font-family: monospace; }
         .badge-bull { background: #064e3b; color: #34d399; border: 1px solid #059669; }
         .badge-bear { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
         
-        /* 推薦股票項目 (點擊瞬間反饋) */
         .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: #182238; border: 1px solid #243049; border-radius: 8px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s; }
         .stock-item:hover { background: #1f2b45; border-color: #38bdf8; }
         .stock-item:active { transform: scale(0.99); }
@@ -64,14 +57,12 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .stock-name { font-size: 14px; font-weight: bold; color: #f1f5f9; }
         .stock-sub { font-size: 12px; color: #94a3b8; font-family: monospace; margin-top: 2px; }
         
-        /* 回測數據網格 */
         .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; text-align: center; font-family: monospace; }
         @media (min-width: 480px) and (max-width: 959px) { .grid-4 { grid-template-columns: repeat(4, 1fr); } }
         .grid-item { background: #182238; padding: 10px; border-radius: 8px; border: 1px solid #1e293b; }
         .grid-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
         .grid-val { font-size: 16px; font-weight: bold; }
         
-        /* 表格樣式 (電腦版寬螢幕更舒適) */
         .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th { text-align: left; padding: 10px 8px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; }
@@ -85,29 +76,30 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .green { color: #34d399; }
         .red { color: #f87171; }
         
-        /* 電腦專用欄位在手機隱藏 */
         .desktop-only { display: none; }
         @media (min-width: 768px) { .desktop-only { display: table-cell; } }
         
-        /* 彈窗樣式 (自適應：手機貼底、電腦置中大畫面) */
+        /* 彈窗樣式 */
         .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.75); display: none; align-items: flex-end; justify-content: center; }
         @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 20px; } }
         .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 16px 16px 0 0; width: 100%; max-width: 680px; padding: 20px; max-height: 90vh; overflow-y: auto; }
         @media (min-width: 640px) { .modal-box { border-radius: 16px; } }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 14px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 12px; }
         .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
         .close-btn:hover { background: #334155; color: #fff; }
         
-        /* 圖表高度自適應 (電腦版 280px 大圖更清晰) */
-        .chart-box { height: 220px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; padding: 8px; margin: 12px 0; }
+        /* 頂部動態抬頭資訊 HUD (手指滑動時資料即時同步此處，絕不遮擋視線) */
+        .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        .hud-val { font-weight: bold; }
+        
+        /* 圖表高度自適應與觸控拖曳鎖定 */
+        .chart-box { height: 220px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; padding: 8px; touch-action: none; }
         @media (min-width: 640px) { .chart-box { height: 280px; } }
         
-        /* 因子網格自適應 (手機 3 欄、電腦 6 欄一字排開) */
         .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; text-align: center; font-family: monospace; }
         @media (min-width: 640px) { .factor-grid { grid-template-columns: repeat(6, 1fr); } }
         .factor-card { background: #182238; border: 1px solid #23304a; border-radius: 8px; padding: 8px 4px; }
         
-        /* 外開按鈕 */
         .btn-link { display: block; width: 100%; padding: 12px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 14px; transition: background 0.15s; }
         .btn-link:hover { background: #1d4ed8; }
         
@@ -140,7 +132,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- ================= 台股 ================= -->
         <div id="content-tw">
             <div class="desktop-grid">
-                <!-- 左欄：操作指引與回測績效 -->
                 <div>
                     <div class="card">
                         <div class="card-header">
@@ -174,7 +165,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
 
-                <!-- 右欄：完整天梯排行 -->
                 <div class="card">
                     <div class="card-title" style="margin-bottom: 10px;">標的評分排序 (點擊列開啟詳細數據與圖表)</div>
                     <div class="table-wrap">
@@ -201,7 +191,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- ================= 美股 ================= -->
         <div id="content-us" class="hidden">
             <div class="desktop-grid">
-                <!-- 左欄：操作指引與回測績效 -->
                 <div>
                     <div class="card">
                         <div class="card-header">
@@ -235,7 +224,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
 
-                <!-- 右欄：完整天梯排行 -->
                 <div class="card">
                     <div class="card-title" style="margin-bottom: 10px;">標的評分排序 (點擊列開啟詳細數據與圖表)</div>
                     <div class="table-wrap">
@@ -272,17 +260,21 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     <span id="modal-name" style="font-size: 18px; font-weight: bold; color: #f8fafc;">-</span>
                     <span id="modal-symbol" style="font-size: 12px; color: #64748b; font-family: monospace; margin-left: 6px;">-</span>
                     <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">
-                        收盤價: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace;">-</span>
+                        最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace;">-</span>
                         <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
                 </div>
                 <button class="close-btn" onclick="closeStockModal()">✕</button>
             </div>
 
-            <!-- 圖表 -->
-            <div style="font-size: 12px; color: #64748b; display: flex; justify-content: space-between;">
-                <span>近 60 日走勢 (藍線: 股價 / 黃線: 50MA 生命線)</span>
+            <!-- 圖表抬頭即時 HUD 數據欄 (手指在圖上滑動，這裡即時跳出數據，不遮擋視線) -->
+            <div id="chart-hud" class="chart-hud">
+                <span id="hud-date" style="color: #cbd5e1;">📅 --</span>
+                <span id="hud-price" style="color: #38bdf8;">股價: --</span>
+                <span id="hud-sma" style="color: #fbbf24;">50MA: --</span>
             </div>
+
+            <!-- 圖表容器 (支援手機觸控滑動) -->
             <div class="chart-box">
                 <canvas id="modalChart"></canvas>
             </div>
@@ -324,6 +316,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <script>
         const STOCKS_DATABASE = __STOCKS_DATABASE_JSON__;
         let chartInstance = null;
+        let currentStockData = null;
 
         function switchTab(market) {
             const tabTw = document.getElementById('tab-tw');
@@ -344,9 +337,24 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
+        function updateHUD(date, price, sma, isTw) {
+            const curr = isTw ? 'NT$' : '$';
+            document.getElementById('hud-date').innerHTML = '📅 <b>' + date + '</b>';
+            document.getElementById('hud-price').innerHTML = '股價: <b style="color:#38bdf8;">' + curr + price.toFixed(2) + '</b>';
+            
+            if (sma !== null && sma !== undefined) {
+                const bias = ((price - sma) / sma) * 100;
+                const biasColor = bias >= 0 ? '#34d399' : '#f87171';
+                document.getElementById('hud-sma').innerHTML = '50MA: <b style="color:#fbbf24;">' + curr + sma.toFixed(2) + '</b> <span style="color:' + biasColor + ';">(' + (bias >= 0 ? '+' : '') + bias.toFixed(1) + '%)</span>';
+            } else {
+                document.getElementById('hud-sma').innerText = '50MA: --';
+            }
+        }
+
         function openStockModal(ticker) {
             const data = STOCKS_DATABASE[ticker];
             if (!data) return;
+            currentStockData = data;
 
             document.getElementById('modal-name').innerText = data.name;
             document.getElementById('modal-symbol').innerText = data.symbol;
@@ -386,6 +394,10 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 extLink.href = 'https://www.tradingview.com/symbols/' + data.symbol + '/';
             }
 
+            // 預設 HUD 顯示最後一筆（最新）收盤數據
+            const lastIdx = data.chart_dates.length - 1;
+            updateHUD(data.chart_dates[lastIdx], data.chart_prices[lastIdx], data.chart_sma50[lastIdx], data.is_tw);
+
             updateChartFast(data);
 
             const modal = document.getElementById('stock-modal');
@@ -402,6 +414,29 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
+        // 十字垂直準星線插件
+        const verticalLinePlugin = {
+            id: 'verticalLine',
+            afterDraw: (chart) => {
+                if (chart.tooltip && chart.tooltip._active && chart.tooltip._active.length) {
+                    const activePoint = chart.tooltip._active[0];
+                    const ctx = chart.ctx;
+                    const x = activePoint.element.x;
+                    const topY = chart.scales.y.top;
+                    const bottomY = chart.scales.y.bottom;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(x, topY);
+                    ctx.lineTo(x, bottomY);
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
+                    ctx.setLineDash([3, 3]);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+        };
+
         function updateChartFast(data) {
             const ctx = document.getElementById('modalChart').getContext('2d');
             
@@ -417,6 +452,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                 borderWidth: 2,
                                 pointRadius: 0,
                                 pointHoverRadius: 4,
+                                pointHoverBackgroundColor: '#38bdf8',
                                 fill: false,
                                 tension: 0.1
                             },
@@ -426,16 +462,46 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                 borderWidth: 1.5,
                                 borderDash: [4, 4],
                                 pointRadius: 0,
+                                pointHoverRadius: 0,
                                 fill: false,
                                 tension: 0.1
                             }
                         ]
                     },
+                    plugins: [verticalLinePlugin],
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         animation: false,
-                        plugins: { legend: { display: false } },
+                        // 核心：X 軸磁吸感應 (只要在同一個垂直位置即可觸發，不用對準點)
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                            axis: 'x'
+                        },
+                        events: ['mousemove', 'mouseout', 'click', 'touchstart', 'touchmove'],
+                        onHover: (event, activeElements) => {
+                            if (activeElements && activeElements.length > 0 && currentStockData) {
+                                const idx = activeElements[0].index;
+                                updateHUD(
+                                    currentStockData.chart_dates[idx],
+                                    currentStockData.chart_prices[idx],
+                                    currentStockData.chart_sma50[idx],
+                                    currentStockData.is_tw
+                                );
+                            }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                enabled: true,
+                                backgroundColor: '#1e293b',
+                                titleColor: '#94a3b8',
+                                bodyColor: '#f1f5f9',
+                                bodyFont: { family: 'monospace' },
+                                displayColors: false
+                            }
+                        },
                         scales: {
                             x: { grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } } },
                             y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10, family: 'monospace' } } }
@@ -607,4 +673,4 @@ class WebDashboardGenerator:
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"網頁自適應生成完成：{output_path}")
+        print(f"網頁磁吸拖曳版生成完成：{output_path}")
