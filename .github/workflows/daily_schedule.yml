@@ -3,8 +3,8 @@ name: Tech Quant Daily Scheduler & Webpage Deploy
 # 定時排程：每天在台股開盤前 (UTC 00:30 = 台灣 08:30) 與美股開盤前 (UTC 13:00 = 台灣 21:00) 自動執行
 on:
   schedule:
-    - cron: '30 0 * * 1-5'   # 週一至週五 台灣 08:30 (台股晨間推播)
-    - cron: '0 13 * * 1-5'   # 週一至週五 台灣 21:00 (美股晚間推播)
+    - cron: '30 0 * * 1-5'   # 週一至週五 台灣 08:30 (台股開盤前晨間推播)
+    - cron: '0 15 * * 1-5'   # 週一至週五 台灣 23:00 (美股冬令開盤後半小時晚間推播)
   push:
     branches: [ main ]       # 每次推送到 main 分支時也自動執行
   workflow_dispatch:         # 支援隨時手動點擊「Run workflow」立即測試
