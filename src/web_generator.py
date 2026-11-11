@@ -1316,7 +1316,14 @@ class WebDashboardGenerator:
         tw_recom_html = cls.build_recommendation_html(tw_top3, is_tw=True)
 
         us_top3 = us_rank.head(3)
-        us_market_bull = (us_top3["above_50sma"].sum() >= 2)
+        us_bull_count = us_top3["above_50sma"].sum()
+        qqq_df = dataset.get("QQQ")
+        qqq_bull = True
+        if qqq_df is not None and not qqq_df.empty:
+            q_close = float(qqq_df["close"].iloc[-1])
+            q_sma200 = float(qqq_df["close"].rolling(200).mean().iloc[-1])
+            qqq_bull = (q_close >= q_sma200)
+        us_market_bull = (us_bull_count >= 2 and qqq_bull)
         us_state_badge = "badge-bull" if us_market_bull else "badge-bear"
         us_state_text = "多頭攻擊：持股續抱 / 換股" if us_market_bull else "保守防禦：留意停利 / 停損"
         us_recom_html = cls.build_recommendation_html(us_top3, is_tw=False)

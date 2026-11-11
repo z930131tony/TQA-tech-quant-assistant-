@@ -17,7 +17,10 @@ class TechBacktester:
         rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
         top_n: int = 3,                    # 持有前 N 強標的
         enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
-        trailing_stop_pct: float = 0.08    # 追蹤停損 8%
+        trailing_stop_pct: float = 0.08,   # 追蹤停損 8%
+        start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
+        end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
+        execution_mode: str = "same_close" # "same_close" (當日收盤) 或 "next_open" (隔日開盤，消除收盤即時成交偏差)
     ):
         self.dataset = dataset
         self.initial_capital = initial_capital
@@ -26,6 +29,9 @@ class TechBacktester:
         self.top_n = top_n
         self.enable_50sma_filter = enable_50sma_filter
         self.trailing_stop_pct = trailing_stop_pct
+        self.start_date = start_date
+        self.end_date = end_date
+        self.execution_mode = execution_mode
 
     def run(self, market: str = "US") -> Dict:
         """
@@ -52,6 +58,13 @@ class TechBacktester:
             raise ValueError("歷史資料天數過短，不足以完成指標預熱！")
 
         test_dates = all_dates[start_idx:]
+        if self.start_date:
+            test_dates = [d for d in test_dates if d >= pd.to_datetime(self.start_date)]
+        if self.end_date:
+            test_dates = [d for d in test_dates if d <= pd.to_datetime(self.end_date)]
+
+        if len(test_dates) < 5:
+            raise ValueError(f"指定區間交易日過短 ({len(test_dates)} 天)，無法回測！")
         
         # 3. 準備回測狀態變數
         cash = self.initial_capital
@@ -62,48 +75,107 @@ class TechBacktester:
         portfolio_values = []
         trade_logs = []
         
+        pending_sells = []   # 用于 next_open 模式: [(ticker, reason)]
+        pending_buys = []    # 用于 next_open 模式: [(ticker, budget, score)]
+
         # 4. 開始日線回測循環
         for day_idx, current_date in enumerate(test_dates):
-            # A. 更新當前持倉的市值與最高價（用於追蹤停損）
-            current_portfolio_value = cash
+            # 若為 next_open 模式，於今日開盤執行昨日留存委託
+            if self.execution_mode == "next_open":
+                # 執行昨日 pending 賣單
+                for ticker, reason in pending_sells:
+                    if ticker in holdings:
+                        df = filtered_data[ticker]
+                        if current_date in df.index:
+                            open_p = float(df.loc[current_date, "open"])
+                            shares = holdings.pop(ticker)
+                            sell_proceeds = shares * open_p * (1 - self.fee_rate)
+                            cash += sell_proceeds
+                            pnl = sell_proceeds - (shares * entry_prices[ticker])
+                            pnl_pct = (open_p / entry_prices[ticker] - 1) * 100
+                            trade_logs.append({
+                                "date": current_date,
+                                "ticker": ticker,
+                                "action": "SELL",
+                                "reason": reason,
+                                "price": round(open_p, 2),
+                                "shares": round(shares, 4),
+                                "pnl": round(pnl, 2),
+                                "pnl_pct": f"{pnl_pct:+.2f}%"
+                            })
+                            entry_prices.pop(ticker, None)
+                            peak_prices.pop(ticker, None)
+                pending_sells = []
+
+                # 執行昨日 pending 買單
+                for ticker, budget, score in pending_buys:
+                    df = filtered_data[ticker]
+                    if current_date in df.index:
+                        open_p = float(df.loc[current_date, "open"])
+                        current_shares = holdings.get(ticker, 0.0)
+                        current_val = current_shares * open_p
+                        if budget > current_val:
+                            alloc = min(budget - current_val, cash)
+                            if alloc > 100.0:
+                                cost_p = open_p * (1 + self.fee_rate)
+                                shares_to_buy = alloc / cost_p
+                                cash -= shares_to_buy * cost_p
+                                if ticker in holdings:
+                                    total_shares = current_shares + shares_to_buy
+                                    avg_cost = (current_val + alloc) / total_shares
+                                    holdings[ticker] = total_shares
+                                    entry_prices[ticker] = avg_cost
+                                else:
+                                    holdings[ticker] = shares_to_buy
+                                    entry_prices[ticker] = open_p
+                                    peak_prices[ticker] = open_p
+                                trade_logs.append({
+                                    "date": current_date,
+                                    "ticker": ticker,
+                                    "action": "BUY",
+                                    "reason": f"動能入選 (評分: {score:.1f}, 隔日開盤成交)",
+                                    "price": round(open_p, 2),
+                                    "shares": round(shares_to_buy, 4),
+                                    "pnl": 0.0,
+                                    "pnl_pct": "0.00%"
+                                })
+                pending_buys = []
+
+            # A. 停損平倉判斷 (以當日收盤價檢驗)
             liquidate_due_to_stop = []
-            
             for ticker, shares in list(holdings.items()):
                 df = filtered_data[ticker]
                 if current_date in df.index:
                     curr_price = float(df.loc[current_date, "close"])
-                    # 更新波段最高價
                     peak_prices[ticker] = max(peak_prices.get(ticker, curr_price), curr_price)
-                    
-                    # 檢查追蹤停損 (Trailing Stop)
                     drawdown_from_peak = (peak_prices[ticker] - curr_price) / peak_prices[ticker]
                     if drawdown_from_peak >= self.trailing_stop_pct:
                         liquidate_due_to_stop.append((ticker, curr_price, "停損平倉 (回檔達8%)"))
-                    else:
-                        current_portfolio_value += shares * curr_price
-                else:
-                    # 若當日無資料，以最後已知名稱暫估
-                    pass
 
-            # 執行停損平倉
-            for ticker, exit_price, reason in liquidate_due_to_stop:
-                shares = holdings.pop(ticker)
-                sell_proceeds = shares * exit_price * (1 - self.fee_rate)
-                cash += sell_proceeds
-                pnl = sell_proceeds - (shares * entry_prices[ticker])
-                pnl_pct = (exit_price / entry_prices[ticker] - 1) * 100
-                trade_logs.append({
-                    "date": current_date,
-                    "ticker": ticker,
-                    "action": "SELL",
-                    "reason": reason,
-                    "price": round(exit_price, 2),
-                    "shares": round(shares, 4),
-                    "pnl": round(pnl, 2),
-                    "pnl_pct": f"{pnl_pct:+.2f}%"
-                })
-                entry_prices.pop(ticker, None)
-                peak_prices.pop(ticker, None)
+            if self.execution_mode == "next_open":
+                for ticker, _, reason in liquidate_due_to_stop:
+                    if ticker not in [x[0] for x in pending_sells]:
+                        pending_sells.append((ticker, reason + " (隔日開盤市價出清)"))
+            else:
+                for ticker, exit_price, reason in liquidate_due_to_stop:
+                    if ticker in holdings:
+                        shares = holdings.pop(ticker)
+                        sell_proceeds = shares * exit_price * (1 - self.fee_rate)
+                        cash += sell_proceeds
+                        pnl = sell_proceeds - (shares * entry_prices[ticker])
+                        pnl_pct = (exit_price / entry_prices[ticker] - 1) * 100
+                        trade_logs.append({
+                            "date": current_date,
+                            "ticker": ticker,
+                            "action": "SELL",
+                            "reason": reason,
+                            "price": round(exit_price, 2),
+                            "shares": round(shares, 4),
+                            "pnl": round(pnl, 2),
+                            "pnl_pct": f"{pnl_pct:+.2f}%"
+                        })
+                        entry_prices.pop(ticker, None)
+                        peak_prices.pop(ticker, None)
 
             # B. 週期性調倉 (Rebalancing)
             if day_idx % self.rebalance_freq == 0:
@@ -152,75 +224,93 @@ class TechBacktester:
                     target_tickers = []
                     top_targets = []
                 
-                # 1. 賣出：平倉不在目標清單中的持股
-                for ticker in list(holdings.keys()):
-                    if ticker not in target_tickers:
-                        df = filtered_data[ticker]
-                        if current_date in df.index:
-                            curr_price = float(df.loc[current_date, "close"])
-                            shares = holdings.pop(ticker)
-                            sell_proceeds = shares * curr_price * (1 - self.fee_rate)
-                            cash += sell_proceeds
-                            pnl = sell_proceeds - (shares * entry_prices[ticker])
-                            pnl_pct = (curr_price / entry_prices[ticker] - 1) * 100
-                            trade_logs.append({
-                                "date": current_date,
-                                "ticker": ticker,
-                                "action": "SELL",
-                                "reason": "調倉換股 (動能減弱/跌破50MA)",
-                                "price": round(curr_price, 2),
-                                "shares": round(shares, 4),
-                                "pnl": round(pnl, 2),
-                                "pnl_pct": f"{pnl_pct:+.2f}%"
-                            })
-                            entry_prices.pop(ticker, None)
-                            peak_prices.pop(ticker, None)
-
-                # 2. 買入 / 調倉：為目標清單中的標的配置資金
-                # 每個標的目標配置比例為 1 / top_n
-                if target_tickers:
-                    # 重新計算當前可用總資產 (Cash + 現有持倉市值)
-                    equity = cash
-                    for t, s in holdings.items():
-                        df = filtered_data[t]
-                        if current_date in df.index:
-                            equity += s * float(df.loc[current_date, "close"])
-                    
-                    target_alloc_per_ticker = equity / self.top_n
-                    
-                    for ticker, score, curr_price in top_targets:
-                        current_shares = holdings.get(ticker, 0.0)
-                        current_val = current_shares * curr_price
-                        
-                        # 若尚未達到目標倉位，進行加碼買入
-                        if target_alloc_per_ticker > current_val:
-                            budget = min(target_alloc_per_ticker - current_val, cash)
-                            if budget > (equity * 0.02):  # 差異大於 2% 才調整，避免微額碎股頻繁交易
-                                buy_cost_per_share = curr_price * (1 + self.fee_rate)
-                                shares_to_buy = budget / buy_cost_per_share
-                                cash -= shares_to_buy * buy_cost_per_share
-                                
-                                # 更新持倉與加權平均進場成本
-                                if ticker in holdings:
-                                    total_shares = current_shares + shares_to_buy
-                                    avg_cost = (current_val + budget) / total_shares
-                                    holdings[ticker] = total_shares
-                                    entry_prices[ticker] = avg_cost
-                                else:
-                                    holdings[ticker] = shares_to_buy
-                                    entry_prices[ticker] = curr_price
-                                    peak_prices[ticker] = curr_price
-                                    
+                if self.execution_mode == "next_open":
+                    # 賣出不在名單中的持股 (於明日開盤執行)
+                    for ticker in list(holdings.keys()):
+                        if ticker not in target_tickers and ticker not in [x[0] for x in pending_sells]:
+                            pending_sells.append((ticker, "調倉換股 (動能減弱/跌破50MA, 隔日開盤出清)"))
+                    # 買進目標持股 (於明日開盤執行)
+                    if target_tickers:
+                        equity = cash
+                        for t, s in holdings.items():
+                            df = filtered_data[t]
+                            if current_date in df.index:
+                                equity += s * float(df.loc[current_date, "close"])
+                            else:
+                                p_sub = df.loc[df.index <= current_date, "close"]
+                                if not p_sub.empty:
+                                    equity += s * float(p_sub.iloc[-1])
+                        target_alloc = equity / self.top_n
+                        for ticker, score, _ in top_targets:
+                            pending_buys.append((ticker, target_alloc, score))
+                else:
+                    # same_close: 當日收盤直接買賣
+                    # 1. 賣出：平倉不在目標清單中的持股
+                    for ticker in list(holdings.keys()):
+                        if ticker not in target_tickers:
+                            df = filtered_data[ticker]
+                            if current_date in df.index:
+                                curr_price = float(df.loc[current_date, "close"])
+                                shares = holdings.pop(ticker)
+                                sell_proceeds = shares * curr_price * (1 - self.fee_rate)
+                                cash += sell_proceeds
+                                pnl = sell_proceeds - (shares * entry_prices[ticker])
+                                pnl_pct = (curr_price / entry_prices[ticker] - 1) * 100
                                 trade_logs.append({
                                     "date": current_date,
                                     "ticker": ticker,
-                                    "action": "BUY",
-                                    "reason": f"動能入選 (評分: {score:.1f})",
+                                    "action": "SELL",
+                                    "reason": "調倉換股 (動能減弱/跌破50MA)",
                                     "price": round(curr_price, 2),
-                                    "shares": round(shares_to_buy, 4),
-                                    "pnl": 0.0,
-                                    "pnl_pct": "0.00%"
+                                    "shares": round(shares, 4),
+                                    "pnl": round(pnl, 2),
+                                    "pnl_pct": f"{pnl_pct:+.2f}%"
                                 })
+                                entry_prices.pop(ticker, None)
+                                peak_prices.pop(ticker, None)
+
+                    # 2. 買入 / 調倉：為目標清單中的標的配置資金
+                    if target_tickers:
+                        equity = cash
+                        for t, s in holdings.items():
+                            df = filtered_data[t]
+                            if current_date in df.index:
+                                equity += s * float(df.loc[current_date, "close"])
+                            else:
+                                p_sub = df.loc[df.index <= current_date, "close"]
+                                if not p_sub.empty:
+                                    equity += s * float(p_sub.iloc[-1])
+                        
+                        target_alloc_per_ticker = equity / self.top_n
+                        for ticker, score, curr_price in top_targets:
+                            current_shares = holdings.get(ticker, 0.0)
+                            current_val = current_shares * curr_price
+                            if target_alloc_per_ticker > current_val:
+                                budget = min(target_alloc_per_ticker - current_val, cash)
+                                if budget > (equity * 0.02):
+                                    buy_cost_per_share = curr_price * (1 + self.fee_rate)
+                                    shares_to_buy = budget / buy_cost_per_share
+                                    cash -= shares_to_buy * buy_cost_per_share
+                                    if ticker in holdings:
+                                        total_shares = current_shares + shares_to_buy
+                                        avg_cost = (current_val + budget) / total_shares
+                                        holdings[ticker] = total_shares
+                                        entry_prices[ticker] = avg_cost
+                                    else:
+                                        holdings[ticker] = shares_to_buy
+                                        entry_prices[ticker] = curr_price
+                                        peak_prices[ticker] = curr_price
+                                        
+                                    trade_logs.append({
+                                        "date": current_date,
+                                        "ticker": ticker,
+                                        "action": "BUY",
+                                        "reason": f"動能入選 (評分: {score:.1f})",
+                                        "price": round(curr_price, 2),
+                                        "shares": round(shares_to_buy, 4),
+                                        "pnl": 0.0,
+                                        "pnl_pct": "0.00%"
+                                    })
 
             # 計算當日收盤最終總淨值 (現金 + 現有持倉市值)
             end_of_day_equity = cash
