@@ -16,9 +16,64 @@ from src.config import TECH_UNIVERSE_TW, config
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portfolio.json")
 
 class PortfolioTracker:
-    @staticmethod
-    def load_portfolio(filepath: str = PORTFOLIO_FILE) -> List[Dict]:
-        """讀取個人持股設定檔"""
+    @classmethod
+    def load_portfolio(cls, filepath: str = PORTFOLIO_FILE) -> List[Dict]:
+        """
+        讀取個人持股設定檔
+        優先級：
+        1. Google Sheets CSV (環境變數 PORTFOLIO_SHEET_URL)
+        2. Supabase REST API (環境變數 SUPABASE_URL + SUPABASE_KEY)
+        3. 本地檔案 (portfolio.json)
+        """
+        # 1. Google Sheets 雲端試算表讀取 (手機端隨時開 App 修改)
+        sheet_url = os.getenv("PORTFOLIO_SHEET_URL", "").strip()
+        if sheet_url:
+            try:
+                df = pd.read_csv(sheet_url)
+                df.columns = [str(c).strip().lower() for c in df.columns]
+                if {"ticker", "shares", "cost_price"}.issubset(df.columns):
+                    df = df.dropna(subset=["ticker", "shares", "cost_price"])
+                    positions = []
+                    for _, row in df.iterrows():
+                        entry_val = ""
+                        if "entry_date" in row and not pd.isna(row["entry_date"]):
+                            entry_val = str(row["entry_date"]).strip()
+                        positions.append({
+                            "ticker": str(row["ticker"]).strip(),
+                            "shares": float(row["shares"]),
+                            "cost_price": float(row["cost_price"]),
+                            "entry_date": entry_val
+                        })
+                    if positions:
+                        return positions
+            except Exception as e:
+                print(f"[警告] 讀取 Google Sheets 雲端持倉失敗，切換回本地: {e}")
+
+        # 2. Supabase 雲端資料庫讀取
+        supabase_url = os.getenv("SUPABASE_URL", "").strip()
+        supabase_key = os.getenv("SUPABASE_KEY", "").strip()
+        if supabase_url and supabase_key:
+            try:
+                import urllib.request
+                endpoint = f"{supabase_url.rstrip('/')}/rest/v1/positions?select=*"
+                req = urllib.request.Request(endpoint, headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}"
+                })
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        if isinstance(data, list) and len(data) > 0:
+                            return [{
+                                "ticker": str(r["ticker"]).strip(),
+                                "shares": float(r["shares"]),
+                                "cost_price": float(r["cost_price"]),
+                                "entry_date": str(r.get("entry_date", "")).strip() if r.get("entry_date") else ""
+                            } for r in data]
+            except Exception as e:
+                print(f"[警告] 讀取 Supabase 雲端持倉失敗，切換回本地: {e}")
+
+        # 3. 本地回退 (portfolio.json)
         if not os.path.exists(filepath):
             return []
         try:
@@ -29,11 +84,29 @@ class PortfolioTracker:
             print(f"[警告] 讀取 portfolio.json 失敗: {e}")
             return []
 
-    @staticmethod
-    def save_portfolio(positions: List[Dict], filepath: str = PORTFOLIO_FILE):
-        """儲存個人持股設定檔"""
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump({"positions": positions}, f, ensure_ascii=False, indent=2)
+    @classmethod
+    def save_portfolio(cls, positions: List[Dict], filepath: str = PORTFOLIO_FILE):
+        """儲存個人持股設定檔 (同時寫入本地快取，若有 Webhook 則同步雲端)"""
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump({"positions": positions}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[警告] 寫入本地 portfolio.json 失敗: {e}")
+
+        # 雲端 Webhook 同步 (選用，例如 Google Apps Script 或 自建 API)
+        webhook_url = os.getenv("PORTFOLIO_WEBHOOK_URL", "").strip()
+        if webhook_url:
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    webhook_url,
+                    data=json.dumps({"positions": positions}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                print(f"[警告] 同步至雲端 Webhook 失敗: {e}")
 
     @classmethod
     def evaluate_portfolio(cls, dataset: Dict[str, pd.DataFrame]) -> List[Dict]:

@@ -107,19 +107,36 @@ except Exception as e:
     results["交易時區分流"] = False
 
 # -------------------------------------------------------------
-# 測試 4: 庫存 JSON 與風控追蹤完整性
+# 測試 4: 庫存雲端適配器 (Google Sheets / 本地 JSON) 與風控
 # -------------------------------------------------------------
-print("\n[測試 4/6] 驗證 portfolio.json 持久化與波段最高價追蹤...")
+print("\n[測試 4/6] 驗證持倉雲端適配器 (Google Sheets CSV / 本地回退) 與風控評估...")
 try:
+    # 4A. 本地 portfolio.json 讀取測試
     positions = PortfolioTracker.load_portfolio()
     evaluated = PortfolioTracker.evaluate_portfolio(dataset)
-    print(f"  ✅ 現有部位筆數: {len(positions)} 筆，風控評估筆數: {len(evaluated)} 筆")
     valid_keys = all({"ticker", "cost_price", "shares"}.issubset(p.keys()) for p in positions)
-    results["庫存持久化與風控"] = valid_keys
+    print(f"  ✅ 本地 JSON 讀取正常 (現有 {len(positions)} 筆部位，風控評估 {len(evaluated)} 筆)")
+
+    # 4B. 雲端 Google Sheets CSV 讀取模擬測試
+    mock_csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock_sheet.csv")
+    with open(mock_csv_path, "w", encoding="utf-8") as f:
+        f.write("ticker,shares,cost_price,entry_date\n2330.TW,100,1050,2026-10-01\nNVDA,10,135.5,2026-10-15\n")
+    
+    os.environ["PORTFOLIO_SHEET_URL"] = mock_csv_path
+    cloud_positions = PortfolioTracker.load_portfolio()
+    os.environ.pop("PORTFOLIO_SHEET_URL", None)
+    if os.path.exists(mock_csv_path):
+        os.remove(mock_csv_path)
+
+    cloud_ok = (len(cloud_positions) == 2 and cloud_positions[0]["ticker"] == "2330.TW" and cloud_positions[1]["ticker"] == "NVDA")
+    print(f"  ✅ 雲端 Google Sheets 試算表解析測試: {'PASS' if cloud_ok else 'FAIL'}")
+
+    results["持倉雲端適配與風控"] = (valid_keys and cloud_ok)
 except Exception as e:
-    print(f"  ❌ 庫存檢查異常: {e}")
-    results["庫存持久化與風控"] = False
+    print(f"  ❌ 持倉模組檢查異常: {e}")
+    results["持倉雲端適配與風控"] = False
 finally:
+    os.environ.pop("PORTFOLIO_SHEET_URL", None)
     # 測試結束後還原真實部位狀態，避免污染
     if backup_portfolio is not None:
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:

@@ -48,6 +48,9 @@ jobs:
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          PORTFOLIO_SHEET_URL: ${{ secrets.PORTFOLIO_SHEET_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: |
           python run_daily.py --market ${{ github.event.inputs.market || 'AUTO' }}
 
