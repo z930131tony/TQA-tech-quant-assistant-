@@ -46,6 +46,7 @@ def main():
     # 4. 生成 index.html
     output_html = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
     WebDashboardGenerator.generate_html(
+        dataset=dataset,
         tw_rank=tw_rank,
         us_rank=us_rank,
         tw_backtest=tw_backtest,
