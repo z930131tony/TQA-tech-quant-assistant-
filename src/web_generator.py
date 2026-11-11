@@ -124,7 +124,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
         <div class="update-box">
-            <div class="update-label">數據更新</div>
+            <div class="update-label">數據更新 <span style="color: #34d399; font-size: 10px;">● 自動同步中</span></div>
             <div class="update-time">__UPDATE_TIME__</div>
         </div>
     </header>
@@ -354,6 +354,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <script>
+        const CURRENT_BUILD_TIME = "__UPDATE_TIME__";
         const STOCKS_DATABASE = __STOCKS_DATABASE_JSON__;
         let mainChart = null;
         let kdChart = null;
@@ -645,6 +646,44 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     mainChart.timeScale().fitContent();
                     kdChart.timeScale().fitContent();
                 }
+            }
+        });
+
+        // ================= 自動熱更新機制 (背景定時檢查 + 喚醒比對) =================
+        let isCheckingUpdate = false;
+        async function checkCloudUpdates() {
+            if (isCheckingUpdate) return;
+            isCheckingUpdate = true;
+            try {
+                // 發送微小帶時間戳請求抓取網頁，強制跳過本機快取
+                const url = window.location.href.split('?')[0] + '?t=' + Date.now();
+                const resp = await fetch(url, {
+                    method: 'GET',
+                    cache: 'no-cache',
+                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+                });
+                if (resp.ok) {
+                    const text = await resp.text();
+                    const match = text.match(/const CURRENT_BUILD_TIME = "([^"]+)";/);
+                    if (match && match[1] && match[1] !== CURRENT_BUILD_TIME) {
+                        console.log('[TQA] 偵測到雲端排程已發布新數據 (' + match[1] + ')，自動無縫刷新中...');
+                        window.location.reload();
+                    }
+                }
+            } catch (e) {
+                // 網路中斷或離線時靜默略過
+            } finally {
+                isCheckingUpdate = false;
+            }
+        }
+
+        // 1. 網頁開啟掛著時，每 3 分鐘背景自動檢查一次
+        setInterval(checkCloudUpdates, 3 * 60 * 1000);
+
+        // 2. 當手機解鎖、或電腦從其他分頁切換回來時，立刻喚醒檢查一次
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                checkCloudUpdates();
             }
         });
     </script>
