@@ -814,15 +814,15 @@ class WebDashboardGenerator:
         us_recom_html = cls.build_recommendation_html(us_top3, is_tw=False)
 
         # 2. 歷史回測數據
-        tw_tot = f"{tw_backtest.get('total_return', 0.0):+.2f}%"
-        tw_cagr = f"{tw_backtest.get('cagr', 0.0):+.2f}%"
+        tw_tot = f"{tw_backtest.get('total_return_pct', tw_backtest.get('total_return', 0.0)):+.2f}%"
+        tw_cagr = f"{tw_backtest.get('cagr_pct', tw_backtest.get('cagr', 0.0)):+.2f}%"
         tw_bench = f"{tw_backtest.get('benchmark_return', 0.0):+.2f}%"
-        tw_mdd = f"{tw_backtest.get('max_drawdown', 0.0):.2f}%"
+        tw_mdd = f"{tw_backtest.get('max_drawdown_pct', tw_backtest.get('max_drawdown', 0.0)):.2f}%"
 
-        us_tot = f"{us_backtest.get('total_return', 0.0):+.2f}%"
-        us_cagr = f"{us_backtest.get('cagr', 0.0):+.2f}%"
+        us_tot = f"{us_backtest.get('total_return_pct', us_backtest.get('total_return', 0.0)):+.2f}%"
+        us_cagr = f"{us_backtest.get('cagr_pct', us_backtest.get('cagr', 0.0)):+.2f}%"
         us_bench = f"{us_backtest.get('benchmark_return', 0.0):+.2f}%"
-        us_mdd = f"{us_backtest.get('max_drawdown', 0.0):.2f}%"
+        us_mdd = f"{us_backtest.get('max_drawdown_pct', us_backtest.get('max_drawdown', 0.0)):.2f}%"
 
         # 3. 排序表格
         tw_table_rows = cls.build_table_rows_html(tw_rank, is_tw=True)

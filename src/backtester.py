@@ -242,6 +242,15 @@ class TechBacktester:
             profitable = (trades_df["pnl"] > 0).sum()
             win_rate = (profitable / len(trades_df)) * 100
 
+        # 計算基準報酬 (台股 0052.TW，美股 QQQ)
+        bench_ticker = "0052.TW" if market == "TW" else "QQQ"
+        bench_return = 0.0
+        if bench_ticker in self.dataset:
+            b_df = self.dataset[bench_ticker]
+            b_sub = b_df.loc[test_dates[0]:test_dates[-1]]
+            if not b_sub.empty and len(b_sub) > 1:
+                bench_return = float((b_sub["close"].iloc[-1] / b_sub["close"].iloc[0] - 1) * 100)
+
         return {
             "market": market,
             "start_date": test_dates[0].strftime("%Y-%m-%d"),
@@ -250,9 +259,14 @@ class TechBacktester:
             "initial_capital": start_val,
             "final_value": round(end_val, 2),
             "total_return_pct": round(total_return, 2),
+            "total_return": round(total_return, 2),
             "cagr_pct": round(cagr, 2),
+            "cagr": round(cagr, 2),
             "max_drawdown_pct": round(max_drawdown, 2),
+            "max_drawdown": round(max_drawdown, 2),
             "sharpe_ratio": round(sharpe, 2),
+            "benchmark_ticker": bench_ticker,
+            "benchmark_return": round(bench_return, 2),
             "total_trades": len(trades_df),
             "win_rate_pct": round(win_rate, 2),
             "perf_df": perf_df,
