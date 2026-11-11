@@ -11,6 +11,12 @@
       "shares": 1,
       "cost_price": 533.16,
       "entry_date": "2026-11-11"
+    },
+    {
+      "ticker": "TSLA",
+      "shares": 2,
+      "cost_price": 393.3,
+      "entry_date": "2026-11-11"
     }
   ]
 }
