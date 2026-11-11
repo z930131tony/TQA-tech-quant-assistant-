@@ -82,13 +82,14 @@ class TechDataLoader:
                 pass
 
         lookback = days if days else config.lookback_days
+        min_rows = min(30, max(5, lookback // 3))
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
 
         # 1. 若為台股標的，優先透過 FinMind 抓取乾淨還原日K (避免 yfinance 假除權與 IP 封鎖)
         is_tw = (".TW" in ticker) or (".TWO" in ticker)
         if is_tw:
             df_fm = self.fetch_finmind_taiwan_stock(ticker, days=lookback)
-            if df_fm is not None and len(df_fm) >= 30:
+            if df_fm is not None and len(df_fm) >= min_rows:
                 df_fm.to_csv(cache_file)
                 return df_fm
 
@@ -102,7 +103,7 @@ class TechDataLoader:
                 multi_level_index=False
             )
             
-            if df.empty or len(df) < 30:
+            if df.empty or len(df) < min_rows:
                 print(f"[警告] {ticker} 資料量不足或下載為空")
                 return None
 
