@@ -125,6 +125,32 @@ class TechBacktester:
                 candidates.sort(key=lambda x: x[1], reverse=True)
                 top_targets = candidates[:self.top_n]
                 target_tickers = [x[0] for x in top_targets]
+
+                # 大盤大空頭總避險濾網 (Market Regime Filter)
+                # 台股：前三強需有至少 2 檔站上 50MA（領頭群健康發動）
+                # 美股：QQQ 大盤指數需高於 200MA 年線（大趨勢多頭）
+                is_market_bull = True
+                if market == "TW":
+                    all_scores = []
+                    for t, d in filtered_data.items():
+                        if current_date in d.index:
+                            r = d.loc[current_date]
+                            sc = float(r["momentum_score"]) if not np.isnan(r["momentum_score"]) else -999.0
+                            all_scores.append((t, sc, bool(r["above_50sma"])))
+                    all_scores.sort(key=lambda x: x[1], reverse=True)
+                    top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
+                    is_market_bull = (top3_bull_count >= 2)
+                elif market == "US" and "QQQ" in self.dataset:
+                    q_df = filtered_data.get("QQQ", self.dataset.get("QQQ"))
+                    if q_df is not None and current_date in q_df.index:
+                        q_c = float(q_df.loc[current_date, "close"])
+                        q_sma = float(q_df.loc[current_date, "sma_200"]) if "sma_200" in q_df.columns else float(q_df["close"].rolling(200).mean().loc[current_date])
+                        is_market_bull = (q_c >= q_sma) if not np.isnan(q_sma) else True
+
+                if not is_market_bull:
+                    # 大盤轉入空頭防禦期：不開新倉，保留 100% 現金防禦
+                    target_tickers = []
+                    top_targets = []
                 
                 # 1. 賣出：平倉不在目標清單中的持股
                 for ticker in list(holdings.keys()):
