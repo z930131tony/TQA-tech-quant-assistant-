@@ -1,10 +1,10 @@
 """
-數據下載與標準化清洗模組 (支援台股與美股)
+行情數據下載與標準化模組
 """
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, Optional, Tuple
 import os
 
 from src.config import config, TECH_UNIVERSE_US, TECH_UNIVERSE_TW
@@ -14,15 +14,26 @@ class TechDataLoader:
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
 
-    def fetch_ticker_data(self, ticker: str, days: Optional[int] = None) -> Optional[pd.DataFrame]:
+    def fetch_ticker_data(self, ticker: str, days: Optional[int] = None, force_refresh: bool = False) -> Optional[pd.DataFrame]:
         """
-        下載單一標的歷史資料，並自動完成除權息調整 (Adjusted Prices)
+        下載單一標的歷史資料，支援本機當日快取 (避免每次重複連線等待)
         """
+        cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
+        
+        # 快取檢查：若非強制刷新且快取為今天產生的，直接讀取本機快取 (0.01 秒)
+        if not force_refresh and os.path.exists(cache_file):
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+                if mtime.date() == datetime.now().date():
+                    df = pd.read_csv(cache_file, index_col="date", parse_dates=True)
+                    return df
+            except Exception:
+                pass
+
         lookback = days if days else config.lookback_days
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
         
         try:
-            # yfinance 獲取數據 (auto_adjust=True 會自動還原除權息與分割)
             df = yf.download(
                 ticker, 
                 start=start_date, 
@@ -31,10 +42,14 @@ class TechDataLoader:
                 multi_level_index=False
             )
             
-            if df.empty or len(df) < 50:
-                print(f"⚠️ [警告] {ticker} 資料量不足或下載為空！")
+            if df.empty or len(df) < 30:
+                print(f"[警告] {ticker} 資料量不足或下載為空")
                 return None
-            
+
+            # 處理多層欄位防禦
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+
             # 標準化欄位名稱
             df = df.rename(columns={
                 "Open": "open",
@@ -43,38 +58,46 @@ class TechDataLoader:
                 "Close": "close",
                 "Volume": "volume"
             })
+            
+            # 時區處理：統一移除時區以利對齊
+            if df.index.tz is not None:
+                df.index = df.index.tz_localize(None)
+
             df.index.name = "date"
             df["symbol"] = ticker
             
-            # 清除 NaN
-            df = df.dropna()
+            # 確保數值型別正確
+            numeric_cols = ["open", "high", "low", "close", "volume"]
+            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            df = df.dropna(subset=["close"])
+            
+            # 寫入本機快取
+            df.to_csv(cache_file)
             return df
             
         except Exception as e:
-            print(f"❌ [錯誤] 下載 {ticker} 失敗: {e}")
+            print(f"[錯誤] 下載 {ticker} 異常: {e}")
             return None
 
     def fetch_all_tech_data(self) -> Dict[str, pd.DataFrame]:
         """
-        批次下載台美股所有科技池歷史數據
+        批次下載台美股追蹤名單
         """
         dataset = {}
         
-        # 1. 下載台股科技池
-        print("\n📈 [1/2] 正在抓取台股科技天團數據...")
+        # 1. 台股
+        print("下載台股數據...")
         for ticker, name in TECH_UNIVERSE_TW.items():
-            print(f"  -> 抓取台股: {ticker} ({name})")
             df = self.fetch_ticker_data(ticker)
             if df is not None:
                 dataset[ticker] = df
 
-        # 2. 下載美股科技池
-        print("\n🇺🇸 [2/2] 正在抓取美股科技天團數據...")
+        # 2. 美股
+        print("下載美股數據...")
         for ticker in TECH_UNIVERSE_US:
-            print(f"  -> 抓取美股: {ticker}")
             df = self.fetch_ticker_data(ticker)
             if df is not None:
                 dataset[ticker] = df
 
-        print(f"\n✅ 數據抓取完成！成功獲取 {len(dataset)} 檔標的歷史數據。")
+        print(f"數據下載完成，共成功載入 {len(dataset)} 檔標的。")
         return dataset
