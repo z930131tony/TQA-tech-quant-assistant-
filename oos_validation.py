@@ -104,14 +104,18 @@ def check_data_anomalies(dataset: dict, threshold_drop: float = -0.35) -> list:
     return anomalies
 
 
-def run_oos_split_test(dataset: dict, split_date: str = "2025-06-30"):
+def run_oos_split_test(dataset: dict, split_date: str = "2025-06-30") -> bool:
     """
     檢驗 3：嚴格時間切分樣本外盲測 (In-Sample vs Out-of-Sample)
+    說明：OOS 盲測期之移動均線 (50MA/200MA) 採用切分點前的真實歷史價格作為初始暖機窗口
+          （符合實盤交易首日可查閱過去 50 天歷史走勢之真實場景，無未來數據外洩）。
     """
     print("\n" + "=" * 70)
     print(f"【檢驗 3】樣本外盲測 (OOS Walk-Forward Split，切分點: {split_date})")
     print("=" * 70)
+    print("※ 備註：均線採用切分點前的真實歷史價格暖機，符合實盤首日具備歷史走勢之真實情境。")
 
+    all_passed = True
     for market in ["TW", "US"]:
         m_name = "台股 (TW)" if market == "TW" else "美股 (US)"
         bench_ticker = "0050.TW" if market == "TW" else "QQQ"
@@ -120,8 +124,9 @@ def run_oos_split_test(dataset: dict, split_date: str = "2025-06-30"):
         full = TechBacktester(dataset).run(market)
         # 樣本內 (IS, 訓練期)
         is_res = TechBacktester(dataset, end_date=split_date).run(market)
-        # 樣本外 (OOS, 盲測期)
-        oos_res = TechBacktester(dataset, start_date="2025-07-01").run(market)
+        # 樣本外 (OOS, 盲測期)：切分點隔天起算
+        oos_start = (pd.to_datetime(split_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        oos_res = TechBacktester(dataset, start_date=oos_start).run(market)
 
         print(f"\n>>> 市場：{m_name} (基準 ETF: {bench_ticker})")
         print(f"全區間: {full['start_date']} ~ {full['end_date']} ({full['total_trading_days']} 交易日)")
@@ -144,10 +149,13 @@ def run_oos_split_test(dataset: dict, split_date: str = "2025-06-30"):
         elif ratio >= 0.5:
             print("🟡 泛化評級：【良好 Acceptable】策略具備合理泛化能力。")
         else:
+            all_passed = False
             print("⚠️ 泛化評級：【需警惕】樣本外衰退顯著，可能存在過度擬合。")
 
+    return all_passed
 
-def run_execution_lag_test(dataset: dict):
+
+def run_execution_lag_test(dataset: dict) -> bool:
     """
     檢驗 4：執行時延抗性檢驗 (T+0 Close vs T+1 Open)
     驗證策略是否依賴同根 K 棒收盤價即時成交偏差。
@@ -156,6 +164,7 @@ def run_execution_lag_test(dataset: dict):
     print("【檢驗 4】執行時延抗性檢驗 (T+0 收盤價即時成交 vs T+1 隔日開盤成交)")
     print("=" * 70)
 
+    all_passed = True
     for market in ["TW", "US"]:
         m_name = "台股 (TW)" if market == "TW" else "美股 (US)"
         # 1. T+0 Close (當日收盤成交)
@@ -175,13 +184,16 @@ def run_execution_lag_test(dataset: dict):
         if res_open["total_return"] > 50.0 and res_open["sharpe_ratio"] >= 1.0:
             print("  ✅ 驗證結論：策略在隔日開盤執行下依然保有高夏普與強勁正報酬，非偷看收盤價之虛假利潤！")
         else:
+            all_passed = False
             print("  ⚠️ 驗證結論：策略對執行時延較為敏感，需留意滑價與隔夜跳空風險。")
+
+    return all_passed
 
 
 def main():
     parser = argparse.ArgumentParser(description="TQA 樣本外與防偷看檢驗工具")
     parser.add_argument("--split", type=str, default="2025-06-30", help="IS/OOS 切分日期 (預設 2025-06-30)")
-    parser.add_argument("--skip-data", action="store_true", help="跳過行情下載 (直接使用快取)")
+    parser.add_argument("--skip-data", action="store_true", help="跳過線上行情下載 (直接使用本機快取 CSV)")
     args = parser.parse_args()
 
     print("======================================================================")
@@ -189,22 +201,26 @@ def main():
     print("======================================================================")
 
     loader = TechDataLoader()
-    dataset = loader.fetch_all_tech_data()
+    dataset = loader.fetch_all_tech_data(cache_only=args.skip_data)
 
     # 1. 因果性檢驗
-    check_feature_causality(dataset)
+    causality_ok = check_feature_causality(dataset)
 
     # 2. 數據除權異常掃描
-    check_data_anomalies(dataset)
+    anomalies = check_data_anomalies(dataset)
+    anomalies_ok = (len(anomalies) == 0)
 
     # 3. 樣本外切分測試
-    run_oos_split_test(dataset, split_date=args.split)
+    oos_ok = run_oos_split_test(dataset, split_date=args.split)
 
     # 4. 隔日開盤執行時延檢驗
-    run_execution_lag_test(dataset)
+    lag_ok = run_execution_lag_test(dataset)
 
     print("\n" + "=" * 70)
-    print("檢驗全部完成。無程式性偷看與外洩現象。")
+    if causality_ok and anomalies_ok and oos_ok and lag_ok:
+        print("🎉 總結：四大量化檢驗全數通過！無時間外洩、無除權異常、泛化強韌、隔日開盤獲利成立。")
+    else:
+        print("⚠️ 總結：部分檢驗項目未達最優標竿，請查閱上述詳細報告確認潛在風險。")
     print("======================================================================\n")
 
 

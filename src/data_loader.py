@@ -14,12 +14,19 @@ class TechDataLoader:
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
 
-    def fetch_ticker_data(self, ticker: str, days: Optional[int] = None, force_refresh: bool = False) -> Optional[pd.DataFrame]:
+    def fetch_ticker_data(self, ticker: str, days: Optional[int] = None, force_refresh: bool = False, cache_only: bool = False) -> Optional[pd.DataFrame]:
         """
         下載單一標的歷史資料，支援本機當日快取 (避免每次重複連線等待)
         """
         cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
         
+        # 快取唯讀模式：若指定 cache_only 且檔案存在，直接讀取
+        if cache_only and os.path.exists(cache_file):
+            try:
+                return pd.read_csv(cache_file, index_col="date", parse_dates=True)
+            except Exception:
+                pass
+
         # 快取檢查：若非強制刷新且快取為今天產生的，直接讀取本機快取 (0.01 秒)
         if not force_refresh and os.path.exists(cache_file):
             try:
@@ -79,23 +86,23 @@ class TechDataLoader:
             print(f"[錯誤] 下載 {ticker} 異常: {e}")
             return None
 
-    def fetch_all_tech_data(self) -> Dict[str, pd.DataFrame]:
+    def fetch_all_tech_data(self, force_refresh: bool = False, cache_only: bool = False) -> Dict[str, pd.DataFrame]:
         """
         批次下載台美股追蹤名單
         """
         dataset = {}
         
         # 1. 台股
-        print("下載台股數據...")
+        print("下載台股數據..." if not cache_only else "讀取台股快取數據...")
         for ticker, name in TECH_UNIVERSE_TW.items():
-            df = self.fetch_ticker_data(ticker)
+            df = self.fetch_ticker_data(ticker, force_refresh=force_refresh, cache_only=cache_only)
             if df is not None:
                 dataset[ticker] = df
 
         # 2. 美股
-        print("下載美股數據...")
+        print("下載美股數據..." if not cache_only else "讀取美股快取數據...")
         for ticker in TECH_UNIVERSE_US:
-            df = self.fetch_ticker_data(ticker)
+            df = self.fetch_ticker_data(ticker, force_refresh=force_refresh, cache_only=cache_only)
             if df is not None:
                 dataset[ticker] = df
 
