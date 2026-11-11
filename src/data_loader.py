@@ -14,10 +14,22 @@ class TechDataLoader:
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
 
-    def fetch_ticker_data(self, ticker: str, days: Optional[int] = None) -> Optional[pd.DataFrame]:
+    def fetch_ticker_data(self, ticker: str, days: Optional[int] = None, force_refresh: bool = False) -> Optional[pd.DataFrame]:
         """
-        下載單一標的歷史資料，自動進行除權息與分割調整 (Adjusted Prices)
+        下載單一標的歷史資料，支援本機當日快取 (避免每次重複連線等待)
         """
+        cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
+        
+        # 快取檢查：若非強制刷新且快取為今天產生的，直接讀取本機快取 (0.01 秒)
+        if not force_refresh and os.path.exists(cache_file):
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(cache_file))
+                if mtime.date() == datetime.now().date():
+                    df = pd.read_csv(cache_file, index_col="date", parse_dates=True)
+                    return df
+            except Exception:
+                pass
+
         lookback = days if days else config.lookback_days
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
         
@@ -59,6 +71,8 @@ class TechDataLoader:
             df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
             df = df.dropna(subset=["close"])
             
+            # 寫入本機快取
+            df.to_csv(cache_file)
             return df
             
         except Exception as e:
