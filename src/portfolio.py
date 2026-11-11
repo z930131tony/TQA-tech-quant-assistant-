@@ -143,17 +143,14 @@ class PortfolioTracker:
             sma50 = float(df["close"].rolling(50).mean().iloc[-1])
             is_above_50ma = curr_price >= sma50
 
-            # 計算買進之後的波段最高價
+            # 計算買進之後的波段最高價 (僅搜尋進場日隔天之後的最高價，避開進場日上影線誤判)
             if entry_date:
-                sub_df = df.loc[df.index >= pd.to_datetime(entry_date)]
-                if not sub_df.empty:
-                    peak_price = float(sub_df["high"].max())
-                else:
-                    peak_price = curr_price
+                sub_df = df.loc[df.index > pd.to_datetime(entry_date)]
+                post_entry_high = float(sub_df["high"].max()) if not sub_df.empty else cost_price
             else:
-                peak_price = float(df["high"].tail(60).max())
+                post_entry_high = float(df["high"].tail(60).max())
 
-            peak_price = max(peak_price, curr_price, cost_price)
+            peak_price = max(post_entry_high, curr_price, cost_price)
             drawdown_from_peak = ((curr_price - peak_price) / peak_price) * 100
             trailing_stop_triggered = (drawdown_from_peak <= -8.0)
 

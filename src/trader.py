@@ -53,6 +53,7 @@ class AutoTrader:
         
         trade_logs = []
         kept_positions = []
+        liquidated_today = set()
 
         # ----------------------------------------------------
         # 步驟 1: 檢查現有持股之出場訊號 (停損 8% 或跌破 50MA)
@@ -79,10 +80,13 @@ class AutoTrader:
             shares = float(pos.get("shares", 1))
             entry_date = pos.get("entry_date", today_str)
 
-            # 計算高點與回檔
-            sub_df = df.loc[df.index >= pd.to_datetime(entry_date)]
-            peak_price = float(sub_df["high"].max()) if not sub_df.empty else max(curr_price, cost_price)
-            peak_price = max(peak_price, curr_price, cost_price)
+            # 計算高點與回檔 (僅搜尋進場日隔天之後的最高價，避開進場日上影線誤判)
+            if entry_date:
+                sub_df = df.loc[df.index > pd.to_datetime(entry_date)]
+                post_entry_high = float(sub_df["high"].max()) if not sub_df.empty else cost_price
+            else:
+                post_entry_high = float(df["high"].tail(60).max())
+            peak_price = max(post_entry_high, curr_price, cost_price)
             drawdown = ((curr_price - peak_price) / peak_price) * 100
 
             # 50MA
@@ -98,6 +102,7 @@ class AutoTrader:
                 exit_reason = f"收盤價跌破 50MA 生命線 ({prefix}{sma50:,.1f})"
 
             if exit_reason:
+                liquidated_today.add(ticker)
                 ret_pct = ((curr_price - cost_price) / cost_price) * 100
                 pnl = (curr_price - cost_price) * shares
                 log_msg = f"🔴 【模擬賣出平倉】{name} ({ticker})\n   └ 原因: {exit_reason}\n   └ 平倉價: {prefix}{curr_price:,.2f} (報酬率: {ret_pct:+.2f}%, 損益: {prefix}{pnl:+,.0f})"
@@ -116,11 +121,12 @@ class AutoTrader:
             if tw_bull_count >= 2:
                 tw_candidates = tw_rank[tw_rank["above_50sma"] == True].head(3)
                 tw_top5_tickers = set(tw_rank.head(5)["ticker"])
+                tw_buys_count = 0
                 
                 for _, row in tw_candidates.iterrows():
                     t = row["ticker"]
                     current_held_tickers = set(p["ticker"] for p in kept_positions)
-                    if t in current_held_tickers:
+                    if t in current_held_tickers or t in liquidated_today:
                         continue
                     
                     # 統計目前台股持倉
@@ -136,6 +142,7 @@ class AutoTrader:
                             out_of_top5.sort(key=lambda p: get_tw_rank_idx(p["ticker"]), reverse=True)
                             swap_out = out_of_top5[0]
                             kept_positions.remove(swap_out)
+                            liquidated_today.add(swap_out["ticker"])
                             
                             s_ticker = swap_out["ticker"]
                             s_shares = swap_out["shares"]
@@ -158,18 +165,24 @@ class AutoTrader:
                     px = float(row["price"])
                     shares = max(1, int(self.budget_tw / px))
                     name = TECH_UNIVERSE_TW.get(t, t)
+                    t_entry_date = self.dataset[t].index[-1].strftime("%Y-%m-%d") if (t in self.dataset and not self.dataset[t].empty) else today_str
                     kept_positions.append({
                         "ticker": t,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": today_str
+                        "entry_date": t_entry_date
                     })
+                    tw_buys_count += 1
                     trade_logs.append(
                         f"🟢 【模擬買進委託】{name} ({t})\n"
                         f"   └ 股數: {shares} 股 (零股委託)\n"
                         f"   └ 進場價: NT${px:,.2f} (預算約 NT${shares * px:,.0f})\n"
                         f"   └ 依據: 站上50MA強勢入選 (評分: {row['score']:.1f})"
                     )
+
+                curr_tw_positions = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
+                if tw_buys_count == 0 and curr_tw_positions:
+                    trade_logs.append("✅ 【台股多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
             else:
                 trade_logs.append("🛡️ 【台股風控保護】目前台股前三強僅 1 檔站上 50MA，處於保守防禦模式，今日不開新倉。")
 
@@ -187,11 +200,12 @@ class AutoTrader:
             if us_bull_count >= 2 and qqq_bull:
                 us_candidates = us_rank[us_rank["above_50sma"] == True].head(3)
                 us_top5_tickers = set(us_rank.head(5)["ticker"])
+                us_buys_count = 0
                 
                 for _, row in us_candidates.iterrows():
                     t = row["ticker"]
                     current_held_tickers = set(p["ticker"] for p in kept_positions)
-                    if t in current_held_tickers:
+                    if t in current_held_tickers or t in liquidated_today:
                         continue
                     
                     curr_us_positions = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
@@ -204,6 +218,7 @@ class AutoTrader:
                             out_of_top5.sort(key=lambda p: get_us_rank_idx(p["ticker"]), reverse=True)
                             swap_out = out_of_top5[0]
                             kept_positions.remove(swap_out)
+                            liquidated_today.add(swap_out["ticker"])
                             
                             s_ticker = swap_out["ticker"]
                             s_shares = swap_out["shares"]
@@ -223,18 +238,24 @@ class AutoTrader:
                             
                     px = float(row["price"])
                     shares = max(1, int(self.budget_us / px))
+                    t_entry_date = self.dataset[t].index[-1].strftime("%Y-%m-%d") if (t in self.dataset and not self.dataset[t].empty) else today_str
                     kept_positions.append({
                         "ticker": t,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": today_str
+                        "entry_date": t_entry_date
                     })
+                    us_buys_count += 1
                     trade_logs.append(
                         f"🟢 【模擬買進委託】{t} (美股)\n"
                         f"   └ 股數: {shares} 股\n"
                         f"   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n"
                         f"   └ 依據: 站上50MA強勢入選 (評分: {row['score']:.1f})"
                     )
+
+                curr_us_positions = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
+                if us_buys_count == 0 and curr_us_positions:
+                    trade_logs.append("✅ 【美股多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
             else:
                 trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
 

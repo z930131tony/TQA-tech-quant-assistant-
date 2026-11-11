@@ -133,12 +133,14 @@ class TechDataLoader:
 
         # 1. 若為台股標的，優先透過 FinMind 抓取乾淨還原日K (避免 yfinance 假除權與 IP 封鎖)
         is_tw = (".TW" in ticker) or (".TWO" in ticker)
+        df_fm = None
+        has_unadjusted_split = False
         if is_tw:
             df_fm = self.fetch_finmind_taiwan_stock(ticker, days=lookback)
             if df_fm is not None:
                 df_fm = self._clean_data_frame(df_fm)
                 # 檢查 FinMind 是否有未還原股票分割 (台股單日漲跌幅上限為 10%，跌幅 > 35% 必為未還原分割)
-                has_unadjusted_split = (df_fm["close"].pct_change() < -0.35).any()
+                has_unadjusted_split = bool((df_fm["close"].pct_change() < -0.35).any())
                 if not has_unadjusted_split and len(df_fm) >= min_rows:
                     df_fm.to_csv(cache_file)
                     return df_fm
@@ -181,16 +183,27 @@ class TechDataLoader:
             df = self._clean_data_frame(df)
             
             # 若為台股且 FinMind 有更即時之最新日期 (例如 yfinance 最新日尚為 NaN 或延遲)，以 FinMind 補齊
-            if is_tw and df_fm is not None and not df_fm.empty and not df.empty:
+            if is_tw and df_fm is not None and not df_fm.empty and not df.empty and not has_unadjusted_split:
                 if df.index[-1] < df_fm.index[-1]:
                     missing = df_fm[df_fm.index > df.index[-1]]
                     if not missing.empty:
-                        missing_clean = self._clean_data_frame(missing)
-                        if not missing_clean.empty:
-                            missing_clean["symbol"] = ticker
-                            common_cols = [c for c in df.columns if c in missing_clean.columns]
-                            df = pd.concat([df, missing_clean[common_cols]])
-                            df = self._clean_data_frame(df)
+                        # 檢查雙方重疊日之收盤價基準是否一致 (價差 < 3% 排除除權息或未還原差距)
+                        overlap_dates = df.index.intersection(df_fm.index)
+                        can_stitch = False
+                        if not overlap_dates.empty:
+                            last_common = overlap_dates[-1]
+                            yf_px = float(df.loc[last_common, "close"])
+                            fm_px = float(df_fm.loc[last_common, "close"])
+                            if yf_px > 0 and (abs(fm_px - yf_px) / yf_px) < 0.03:
+                                can_stitch = True
+                        
+                        if can_stitch:
+                            missing_clean = self._clean_data_frame(missing)
+                            if not missing_clean.empty:
+                                missing_clean["symbol"] = ticker
+                                common_cols = [c for c in df.columns if c in missing_clean.columns]
+                                df = pd.concat([df, missing_clean[common_cols]])
+                                df = self._clean_data_frame(df)
 
             if df.empty or len(df) < min_rows:
                 print(f"[警告] {ticker} 清洗後資料量不足 ({len(df)} < {min_rows})")

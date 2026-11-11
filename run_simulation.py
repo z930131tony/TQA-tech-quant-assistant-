@@ -25,6 +25,7 @@ from src.backtester import TechBacktester
 from src.trader import AutoTrader
 from src.web_generator import WebDashboardGenerator
 from src.notifier import LineNotifier
+from src.portfolio import PortfolioTracker
 
 def get_auto_market() -> str:
     """依據當前台灣時間自動判定執行市場"""
@@ -84,10 +85,26 @@ def main():
     # 5. LINE 推播
     notifier = LineNotifier()
     if notifier.channel_access_token and notifier.user_id:
-        msg_header = f"🎯 【TQA 自動模擬交易每日報告 - {target_market}】\n"
-        msg_body = "\n\n".join(trade_logs)
-        notifier.send_message(msg_header + "\n" + msg_body)
-        print("\n📲 已將模擬交易執行報告發送至您的 LINE！")
+        if trade_logs:
+            msg_header = f"🎯 【TQA 自動模擬交易每日報告 - {target_market}】\n"
+            msg_body = "\n\n".join(trade_logs)
+            
+            # 同步附上個人持股風控摘要
+            evaluated_positions = PortfolioTracker.evaluate_portfolio(dataset)
+            if target_market in ["TW", "US"]:
+                portfolio_summary = PortfolioTracker.format_line_notification(evaluated_positions, market_type=target_market)
+            else:
+                tw_note = PortfolioTracker.format_line_notification(evaluated_positions, market_type="TW")
+                us_note = PortfolioTracker.format_line_notification(evaluated_positions, market_type="US")
+                portfolio_summary = "\n\n".join(filter(None, [tw_note, us_note]))
+                
+            if portfolio_summary:
+                full_msg = msg_header + "\n" + msg_body + "\n\n" + portfolio_summary
+            else:
+                full_msg = msg_header + "\n" + msg_body
+
+            notifier.send_message(full_msg)
+            print("\n📲 已將模擬交易執行報告發送至您的 LINE！")
 
     print("\n" + "=" * 60)
     print(f"🎉 模擬交易完成！目前持有 {len(positions)} 檔模擬標的。")

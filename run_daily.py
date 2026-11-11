@@ -30,6 +30,7 @@ def get_auto_market() -> str:
 def main():
     parser = argparse.ArgumentParser(description="TQA 定時運算與推播")
     parser.add_argument("--market", choices=["TW", "US", "AUTO"], default="AUTO")
+    parser.add_argument("--skip-data", action="store_true", help="使用本機快取數據，略過網路下載")
     args = parser.parse_args()
 
     target_market = args.market
@@ -42,7 +43,7 @@ def main():
 
     # 1. 抓取數據
     loader = TechDataLoader()
-    dataset = loader.fetch_all_tech_data()
+    dataset = loader.fetch_all_tech_data(cache_only=args.skip_data)
 
     # 2. 計算特徵與最新天梯
     tw_rank, us_rank = TechFeatureEngine.evaluate_latest_ranking(dataset)

@@ -4,6 +4,7 @@
 import sys
 import os
 import io
+import argparse
 
 # 強制輸出為 UTF-8，避免 Windows cp950 編碼問題
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
@@ -17,12 +18,16 @@ from src.features import TechFeatureEngine
 from src.config import config
 
 def main():
+    parser = argparse.ArgumentParser(description="第一步驗證腳本")
+    parser.add_argument("--skip-data", action="store_true", help="使用本機快取數據，略過網路下載")
+    args = parser.parse_args()
+
     print("=" * 70)
     print("🚀 【台美純科技股量化系統】第一步管線檢驗開始")
     print("=" * 70)
     
     loader = TechDataLoader()
-    dataset = loader.fetch_all_tech_data()
+    dataset = loader.fetch_all_tech_data(cache_only=args.skip_data)
     
     if not dataset:
         print("❌ 未能獲取任何標的數據，請確認網路連線！")
@@ -40,8 +45,12 @@ def main():
         trend_status = "🟢 多頭(>50MA)" if row["above_50sma"] else "🔴 轉弱(<50MA)"
         print(f"#{idx+1:<3} {row['ticker']:<10} {row['name']:<12} {row['price']:<8} {row['roc_20d']:<10} {row['roc_60d']:<10} {row['score']:<10} {trend_status}")
     
-    top_tw = tw_rank.iloc[:config.top_n_picks]
-    print(f"\n💡 台股今日前 {config.top_n_picks} 強勢首選: {', '.join(top_tw['name'].tolist())}")
+    bullish_tw = tw_rank[tw_rank["above_50sma"] == True]
+    if not bullish_tw.empty:
+        top_tw = bullish_tw.iloc[:config.top_n_picks]
+        print(f"\n💡 台股今日前 {len(top_tw)} 強勢首選: {', '.join(top_tw['name'].tolist())}")
+    else:
+        print("\n🛡️ 目前全數標的跌破 50MA（處於空頭防禦期，建議 100% 現金觀望）")
 
     print("\n" + "=" * 70)
     print("🇺🇸 【美股科技天團 - 最新動態天梯排名】")
@@ -52,8 +61,12 @@ def main():
         trend_status = "🟢 多頭(>50MA)" if row["above_50sma"] else "🔴 轉弱(<50MA)"
         print(f"#{idx+1:<3} {row['ticker']:<10} {row['name']:<12} {row['price']:<8} {row['roc_20d']:<10} {row['roc_60d']:<10} {row['score']:<10} {trend_status}")
     
-    top_us = us_rank.iloc[:config.top_n_picks]
-    print(f"\n💡 美股今日前 {config.top_n_picks} 強勢首選: {', '.join(top_us['ticker'].tolist())}")
+    bullish_us = us_rank[us_rank["above_50sma"] == True]
+    if not bullish_us.empty:
+        top_us = bullish_us.iloc[:config.top_n_picks]
+        print(f"\n💡 美股今日前 {len(top_us)} 強勢首選: {', '.join(top_us['ticker'].tolist())}")
+    else:
+        print("\n🛡️ 目前全數標的跌破 50MA（處於空頭防禦期，建議 100% 現金觀望）")
 
     print("\n" + "=" * 70)
     print("🎉 【第一步驗收成功】：數據獲取、特徵工程與排序打分模組運作完全正常！")

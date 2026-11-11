@@ -112,8 +112,14 @@ class LineNotifier:
             return "【TQA 美股操作指引】無可用的市場數據。"
 
         data_date = rank_df.iloc[0].get("data_date", "")
-        # 前 3 名中至少 2 檔站上 50MA 視為多頭攻擊
-        is_bull_attack = bool(rank_df.head(3)["above_50sma"].sum() >= 2) if "above_50sma" in rank_df.columns else False
+        # 前 3 名中至少 2 檔站上 50MA 且 QQQ 年線多頭視為多頭攻擊
+        top3_bull_count = int(rank_df.head(3)["above_50sma"].sum()) if "above_50sma" in rank_df.columns else 0
+        qqq_bull = True
+        if "ticker" in rank_df.columns and "above_200sma" in rank_df.columns:
+            qqq_rows = rank_df[rank_df["ticker"] == "QQQ"]
+            if not qqq_rows.empty:
+                qqq_bull = bool(qqq_rows["above_200sma"].iloc[0])
+        is_bull_attack = bool(top3_bull_count >= 2 and qqq_bull)
 
         # 推薦列表優先顯示 above_50sma == True 的前 3 強
         bull_candidates = rank_df[rank_df["above_50sma"] == True] if "above_50sma" in rank_df.columns else pd.DataFrame()

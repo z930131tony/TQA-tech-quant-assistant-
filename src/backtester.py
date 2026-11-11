@@ -71,6 +71,7 @@ class TechBacktester:
         holdings = {}        # {ticker: shares}
         entry_prices = {}    # {ticker: entry_price}
         peak_prices = {}     # {ticker: peak_price}
+        entry_dates = {}     # {ticker: entry_date}
         
         portfolio_values = []
         trade_logs = []
@@ -105,6 +106,7 @@ class TechBacktester:
                             })
                             entry_prices.pop(ticker, None)
                             peak_prices.pop(ticker, None)
+                            entry_dates.pop(ticker, None)
                 pending_sells = []
 
                 # 執行昨日 pending 買單
@@ -121,14 +123,15 @@ class TechBacktester:
                                 shares_to_buy = alloc / cost_p
                                 cash -= shares_to_buy * cost_p
                                 if ticker in holdings:
+                                    old_cost_total = current_shares * entry_prices[ticker]
                                     total_shares = current_shares + shares_to_buy
-                                    avg_cost = (current_val + alloc) / total_shares
+                                    entry_prices[ticker] = (old_cost_total + (shares_to_buy * open_p)) / total_shares
                                     holdings[ticker] = total_shares
-                                    entry_prices[ticker] = avg_cost
                                 else:
                                     holdings[ticker] = shares_to_buy
                                     entry_prices[ticker] = open_p
                                     peak_prices[ticker] = open_p
+                                    entry_dates[ticker] = current_date
                                 trade_logs.append({
                                     "date": current_date,
                                     "ticker": ticker,
@@ -141,16 +144,19 @@ class TechBacktester:
                                 })
                 pending_buys = []
 
-            # A. 停損平倉判斷 (以當日收盤價檢驗)
+            # A. 停損平倉判斷 (以當日收盤價檢驗，隔日後方才啟動最高價追蹤)
             liquidate_due_to_stop = []
             for ticker, shares in list(holdings.items()):
                 df = filtered_data[ticker]
                 if current_date in df.index:
                     curr_price = float(df.loc[current_date, "close"])
-                    peak_prices[ticker] = max(peak_prices.get(ticker, curr_price), curr_price)
-                    drawdown_from_peak = (peak_prices[ticker] - curr_price) / peak_prices[ticker]
-                    if drawdown_from_peak >= self.trailing_stop_pct:
-                        liquidate_due_to_stop.append((ticker, curr_price, "停損平倉 (回檔達8%)"))
+                    if entry_dates.get(ticker) and current_date > entry_dates[ticker]:
+                        peak_prices[ticker] = max(peak_prices.get(ticker, curr_price), curr_price)
+                        drawdown_from_peak = (peak_prices[ticker] - curr_price) / peak_prices[ticker]
+                        if drawdown_from_peak >= self.trailing_stop_pct:
+                            liquidate_due_to_stop.append((ticker, curr_price, "停損平倉 (回檔達8%)"))
+
+            stopped_out_today = {t for t, _, _ in liquidate_due_to_stop}
 
             if self.execution_mode == "next_open":
                 for ticker, _, reason in liquidate_due_to_stop:
@@ -176,12 +182,15 @@ class TechBacktester:
                         })
                         entry_prices.pop(ticker, None)
                         peak_prices.pop(ticker, None)
+                        entry_dates.pop(ticker, None)
 
             # B. 週期性調倉 (Rebalancing)
             if day_idx % self.rebalance_freq == 0:
-                # 評估當日所有候選股票的評分
+                # 評估當日所有候選股票的評分 (同日剛停損標的排除買回)
                 candidates = []
                 for ticker, df in filtered_data.items():
+                    if ticker in stopped_out_today:
+                        continue
                     if current_date in df.index:
                         row = df.loc[current_date]
                         score = float(row["momentum_score"]) if not np.isnan(row["momentum_score"]) else -999.0
@@ -283,6 +292,7 @@ class TechBacktester:
                                 })
                                 entry_prices.pop(ticker, None)
                                 peak_prices.pop(ticker, None)
+                                entry_dates.pop(ticker, None)
 
                     # 2. 買入 / 調倉：為目標清單中的標的配置資金
                     if target_tickers:
@@ -307,14 +317,15 @@ class TechBacktester:
                                     shares_to_buy = budget / buy_cost_per_share
                                     cash -= shares_to_buy * buy_cost_per_share
                                     if ticker in holdings:
+                                        old_cost_total = current_shares * entry_prices[ticker]
                                         total_shares = current_shares + shares_to_buy
-                                        avg_cost = (current_val + budget) / total_shares
+                                        entry_prices[ticker] = (old_cost_total + (shares_to_buy * curr_price)) / total_shares
                                         holdings[ticker] = total_shares
-                                        entry_prices[ticker] = avg_cost
                                     else:
                                         holdings[ticker] = shares_to_buy
                                         entry_prices[ticker] = curr_price
                                         peak_prices[ticker] = curr_price
+                                        entry_dates[ticker] = current_date
                                         
                                     trade_logs.append({
                                         "date": current_date,
@@ -374,7 +385,7 @@ class TechBacktester:
             profitable = (sell_trades["pnl"] > 0).sum()
             win_rate = (profitable / len(sell_trades)) * 100
 
-        # 計算基準報酬 (台股 0052.TW，美股 QQQ)
+        # 計算基準報酬 (台股 0050.TW，美股 QQQ)
         bench_ticker = "0050.TW" if market == "TW" else "QQQ"
         bench_return = 0.0
         if bench_ticker in self.dataset:
@@ -382,6 +393,8 @@ class TechBacktester:
             b_sub = b_df.loc[test_dates[0]:test_dates[-1]]
             if not b_sub.empty and len(b_sub) > 1:
                 bench_return = float((b_sub["close"].iloc[-1] / b_sub["close"].iloc[0] - 1) * 100)
+
+        closed_trades_count = len(sell_trades) if not sell_trades.empty else 0
 
         return {
             "market": market,
@@ -399,7 +412,9 @@ class TechBacktester:
             "sharpe_ratio": round(sharpe, 2),
             "benchmark_ticker": bench_ticker,
             "benchmark_return": round(bench_return, 2),
-            "total_trades": len(trades_df),
+            "total_trades": closed_trades_count if closed_trades_count > 0 else len(trades_df),
+            "closed_trades": closed_trades_count,
+            "raw_trades_count": len(trades_df),
             "win_rate_pct": round(win_rate, 2),
             "perf_df": perf_df,
             "trades_df": trades_df

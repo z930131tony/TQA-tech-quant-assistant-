@@ -76,6 +76,12 @@ except Exception as e:
 # 測試 3: 模擬交易分流邏輯 (TW 時段不碰美股，US 時段不碰台股)
 # -------------------------------------------------------------
 print("\n[測試 3/6] 驗證交易引擎分流 (target_market: TW vs US)...")
+# 隔離雲端環境變數與備份真實 portfolio.json，避免測試誤碰真實雲端或 Webhook
+cloud_env_keys = ["PORTFOLIO_SHEET_URL", "SUPABASE_URL", "SUPABASE_KEY", "PORTFOLIO_WEBHOOK_URL"]
+saved_env = {k: os.environ.get(k) for k in cloud_env_keys}
+for k in cloud_env_keys:
+    os.environ.pop(k, None)
+
 backup_portfolio = None
 if os.path.exists(PORTFOLIO_FILE):
     with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
@@ -105,6 +111,11 @@ try:
 except Exception as e:
     print(f"  ❌ 交易引擎測試異常: {e}")
     results["交易時區分流"] = False
+finally:
+    # 測試 3 結束時立即還原真實 portfolio.json，確保測試 4A 讀取真實部位
+    if backup_portfolio is not None:
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+            f.write(backup_portfolio)
 
 # -------------------------------------------------------------
 # 測試 4: 庫存雲端適配器 (Google Sheets / 本地 JSON) 與風控
@@ -136,8 +147,12 @@ except Exception as e:
     print(f"  ❌ 持倉模組檢查異常: {e}")
     results["持倉雲端適配與風控"] = False
 finally:
-    os.environ.pop("PORTFOLIO_SHEET_URL", None)
-    # 測試結束後還原真實部位狀態，避免污染
+    # 復原雲端環境變數與真實 portfolio.json
+    for k, v in saved_env.items():
+        if v is not None:
+            os.environ[k] = v
+        else:
+            os.environ.pop(k, None)
     if backup_portfolio is not None:
         with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
             f.write(backup_portfolio)

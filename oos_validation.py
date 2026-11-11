@@ -186,7 +186,7 @@ def run_institutional_oos_test(dataset: dict, split_date: str = "2025-06-30") ->
         mdd_expansion = (oos_mdd / is_mdd) if is_mdd > 0 else 1.0
 
         oos_alpha = float(oos_res["total_return"] - oos_res["benchmark_return"])
-        oos_trades = int(oos_res.get("total_trades", 0))
+        oos_trades = int(oos_res.get("closed_trades", oos_res.get("total_trades", 0)))
         win_rate = float(oos_res.get("win_rate_pct", 0.0))
 
         # 門檻檢驗判定

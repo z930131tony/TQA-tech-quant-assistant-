@@ -1156,10 +1156,10 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
 class WebDashboardGenerator:
     @classmethod
-    def select_recommendations(cls, rank_df: pd.DataFrame) -> pd.DataFrame:
+    def select_top_recommendations(cls, rank_df: pd.DataFrame) -> pd.DataFrame:
         """
         篩選 Top 3 推薦卡片標的：
-        優先篩選 above_50sma == True 且 composite_score (score) > 0 的健康多頭標的。
+        優先篩選 above_50sma == True 的健康多頭標的，並按 composite_score (score) 由高至低排序。
         若該市場符合條件之標的不滿 3 檔，取全部合格者，並由其餘標的按評分由高至低依序補足至 3 檔。
         """
         if rank_df is None or rank_df.empty:
@@ -1167,20 +1167,27 @@ class WebDashboardGenerator:
             
         score_col = "score" if "score" in rank_df.columns else "composite_score"
         
-        # 1. 優先篩選站上 50MA 且評分大於 0 的多頭標的
-        bullish = rank_df[(rank_df["above_50sma"] == True) & (rank_df[score_col] > 0)].copy()
+        # 1. 優先篩選站上 50MA 的多頭標的，並按評分由高至低排序
+        bullish = rank_df[rank_df["above_50sma"] == True].copy() if "above_50sma" in rank_df.columns else pd.DataFrame()
+        if not bullish.empty and score_col in bullish.columns:
+            bullish = bullish.sort_values(by=score_col, ascending=False)
         
         if len(bullish) >= 3:
             return bullish.head(3).reset_index(drop=True)
             
         # 2. 若不滿 3 檔，取所有合格標的，並由其餘標的 (按評分降序) 補足至 3 檔
-        selected_tickers = set(bullish["ticker"])
-        remaining = rank_df[~rank_df["ticker"].isin(selected_tickers)].sort_values(by=score_col, ascending=False)
+        selected_tickers = set(bullish["ticker"]) if not bullish.empty else set()
+        remaining = rank_df[~rank_df["ticker"].isin(selected_tickers)]
+        if score_col in remaining.columns:
+            remaining = remaining.sort_values(by=score_col, ascending=False)
         needed = 3 - len(bullish)
         fillers = remaining.head(needed)
         
         res = pd.concat([bullish, fillers], ignore_index=True)
         return res
+
+    # 保持舊介面相容性
+    select_recommendations = select_top_recommendations
 
     @staticmethod
     def build_recommendation_html(top_df: pd.DataFrame, is_tw: bool, is_market_bull: bool = True) -> str:
