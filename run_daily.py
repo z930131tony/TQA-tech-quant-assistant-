@@ -17,6 +17,7 @@ from src.features import TechFeatureEngine
 from src.backtester import TechBacktester
 from src.web_generator import WebDashboardGenerator
 from src.notifier import LineNotifier
+from src.portfolio import PortfolioTracker
 
 def get_current_tw_hour() -> int:
     tw_tz = pytz.timezone("Asia/Taipei")
@@ -64,10 +65,16 @@ def main():
         target_market = "TW" if curr_hour < 14 else "US"
 
     print(f"發送【{target_market}】市場 LINE 推播...")
+    portfolio_positions = PortfolioTracker.evaluate_portfolio(dataset)
+    portfolio_note = PortfolioTracker.format_line_notification(portfolio_positions, market_type=target_market)
+
     if target_market == "TW":
         msg = LineNotifier.format_tw_morning_message(tw_rank)
     else:
         msg = LineNotifier.format_us_evening_message(us_rank)
+
+    if portfolio_note:
+        msg = portfolio_note + "\n" + msg
 
     notifier.send_message(msg)
     print("排程執行完畢。")

@@ -202,6 +202,11 @@ class TechBacktester:
                 df = filtered_data[t]
                 if current_date in df.index:
                     end_of_day_equity += s * float(df.loc[current_date, "close"])
+                else:
+                    # 若當日該標的休市或無成交，沿用前一交易日已知價格
+                    past_prices = df.loc[df.index <= current_date, "close"]
+                    if not past_prices.empty:
+                        end_of_day_equity += s * float(past_prices.iloc[-1])
 
             portfolio_values.append({
                 "date": current_date,
