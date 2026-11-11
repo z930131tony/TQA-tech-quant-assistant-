@@ -1302,7 +1302,9 @@ class WebDashboardGenerator:
 
     @classmethod
     def generate_html(cls, dataset: Dict[str, pd.DataFrame], tw_rank: pd.DataFrame, us_rank: pd.DataFrame, tw_backtest: dict, us_backtest: dict, output_path: str):
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        import pytz
+        tw_tz = pytz.timezone("Asia/Taipei")
+        now_str = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M")
         tw_date = tw_rank.iloc[0].get("data_date", "-") if not tw_rank.empty else "-"
         us_date = us_rank.iloc[0].get("data_date", "-") if not us_rank.empty else "-"
 

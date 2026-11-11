@@ -1,22 +1,22 @@
 {
   "positions": [
     {
-      "ticker": "2330.TW",
-      "shares": 1000,
-      "cost_price": 1020.0,
-      "entry_date": "2026-09-15"
+      "ticker": "AAPL",
+      "shares": 2,
+      "cost_price": 348.51,
+      "entry_date": "2026-11-11"
     },
     {
-      "ticker": "3231.TW",
-      "shares": 2000,
-      "cost_price": 172.0,
-      "entry_date": "2026-10-15"
+      "ticker": "MSFT",
+      "shares": 1,
+      "cost_price": 533.16,
+      "entry_date": "2026-11-11"
     },
     {
-      "ticker": "NVDA",
-      "shares": 15,
-      "cost_price": 135.0,
-      "entry_date": "2026-10-01"
+      "ticker": "TSLA",
+      "shares": 2,
+      "cost_price": 393.3,
+      "entry_date": "2026-11-11"
     }
   ]
 }

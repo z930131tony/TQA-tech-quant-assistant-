@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.data_loader import TechDataLoader
 from src.features import TechFeatureEngine
 from src.backtester import TechBacktester
+from src.trader import AutoTrader
 from src.web_generator import WebDashboardGenerator
 from src.notifier import LineNotifier
 from src.portfolio import PortfolioTracker
@@ -38,6 +39,11 @@ def main():
 
     # 2. 計算特徵與最新天梯
     tw_rank, us_rank = TechFeatureEngine.evaluate_latest_ranking(dataset)
+
+    # 2.5 執行自動模擬交易與風控比對
+    print("📈 執行自動模擬交易與部位風控...")
+    trader = AutoTrader(dataset=dataset)
+    sim_logs, _ = trader.execute_daily_simulation(tw_rank, us_rank)
 
     # 3. 整理回測成績
     backtester = TechBacktester(dataset=dataset, initial_capital=100000.0)
@@ -72,6 +78,10 @@ def main():
         msg = LineNotifier.format_tw_morning_message(tw_rank)
     else:
         msg = LineNotifier.format_us_evening_message(us_rank)
+
+    if sim_logs:
+        sim_summary = "🎯 【模擬下單執行紀錄】\n" + "\n".join(sim_logs) + "\n\n"
+        msg = sim_summary + msg
 
     if portfolio_note:
         msg = portfolio_note + "\n" + msg
