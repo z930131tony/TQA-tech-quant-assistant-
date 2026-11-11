@@ -1,14 +1,19 @@
-name: Tech Quant Daily Scheduler
+name: Tech Quant Daily Scheduler & Webpage Deploy
 
 # 定時排程：每天在台股開盤前 (UTC 00:30 = 台灣 08:30) 與美股開盤前 (UTC 13:00 = 台灣 21:00) 自動執行
 on:
   schedule:
     - cron: '30 0 * * 1-5'   # 週一至週五 台灣 08:30 (台股晨間)
     - cron: '0 13 * * 1-5'   # 週一至週五 台灣 21:00 (美股晚間)
+  push:
+    branches: [ main ]       # 每次推送到 main 分支時也自動更新網頁
   workflow_dispatch:         # 支援隨時手動點擊「Run workflow」立即測試
 
+permissions:
+  contents: write
+
 jobs:
-  run-tech-quant:
+  run-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - name: 簽出專案代碼 (Checkout)
@@ -25,6 +30,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 執行量化運算與訊號推播
+      - name: 執行量化運算並重新生成手機儀表板 (index.html)
         run: |
-          python verify_step1.py
+          python generate_web.py
+
+      - name: 自動部署到 GitHub Pages (供手機隨時瀏覽)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          destination_dir: ./
+          keep_files: true
