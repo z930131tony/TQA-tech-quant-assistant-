@@ -180,6 +180,18 @@ class TechDataLoader:
             # 強制清洗無效 K 棒 (volume <= 0 或 close <= 0)
             df = self._clean_data_frame(df)
             
+            # 若為台股且 FinMind 有更即時之最新日期 (例如 yfinance 最新日尚為 NaN 或延遲)，以 FinMind 補齊
+            if is_tw and df_fm is not None and not df_fm.empty and not df.empty:
+                if df.index[-1] < df_fm.index[-1]:
+                    missing = df_fm[df_fm.index > df.index[-1]]
+                    if not missing.empty:
+                        missing_clean = self._clean_data_frame(missing)
+                        if not missing_clean.empty:
+                            missing_clean["symbol"] = ticker
+                            common_cols = [c for c in df.columns if c in missing_clean.columns]
+                            df = pd.concat([df, missing_clean[common_cols]])
+                            df = self._clean_data_frame(df)
+
             if df.empty or len(df) < min_rows:
                 print(f"[警告] {ticker} 清洗後資料量不足 ({len(df)} < {min_rows})")
                 return None

@@ -245,6 +245,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
                         </div>
                         <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
+                        <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 10px 0 12px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                            <div style="font-size: 13px; font-weight: 600; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+                                <span>🧮 大戶投零股預算試算</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 12px; color: #94a3b8;">單檔預算: NT$</span>
+                                <input type="number" id="budget-tw-input" value="30000" min="1000" step="1000" oninput="updateBudgetCalc('tw')" style="background: #182238; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: monospace; font-size: 13px; padding: 4px 8px; width: 95px; text-align: right; outline: none;">
+                            </div>
+                        </div>
                         <div>__TW_RECOMMENDATIONS__</div>
                     </div>
 
@@ -333,6 +342,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
                         </div>
                         <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
+                        <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 10px 0 12px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                            <div style="font-size: 13px; font-weight: 600; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+                                <span>🧮 複委託預算試算</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <span style="font-size: 12px; color: #94a3b8;">單檔預算: USD $</span>
+                                <input type="number" id="budget-us-input" value="1000" min="100" step="100" oninput="updateBudgetCalc('us')" style="background: #182238; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: monospace; font-size: 13px; padding: 4px 8px; width: 85px; text-align: right; outline: none;">
+                            </div>
+                        </div>
                         <div>__US_RECOMMENDATIONS__</div>
                     </div>
 
@@ -412,7 +430,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
 
         <div style="text-align: center; font-size: 13px; color: #475569; margin-top: 28px;">
-            數據來源: Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場
+            數據來源: FinMind / Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場
         </div>
     </div>
 
@@ -629,6 +647,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         twEquityChart.timeScale().fitContent();
                     }
                 }
+                updateBudgetCalc('tw');
             } else {
                 tabUs.classList.add('active');
                 tabTw.classList.remove('active');
@@ -647,6 +666,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         }
                     }
                 });
+                updateBudgetCalc('us');
             }
         }
 
@@ -958,9 +978,50 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             }
         });
 
-        // 頁面載入時初始化台股淨值圖
+        // ================= 大戶投 / 複委託預算試算 (前端即時連動 localStorage) =================
+        function updateBudgetCalc(market) {
+            const inputId = 'budget-' + market + '-input';
+            const inputEl = document.getElementById(inputId);
+            if (!inputEl) return;
+            let budget = parseFloat(inputEl.value);
+            if (isNaN(budget) || budget <= 0) {
+                budget = (market === 'tw') ? 30000 : 1000;
+            }
+            try {
+                localStorage.setItem('tqa_budget_' + market, budget);
+            } catch (e) {}
+
+            const items = document.querySelectorAll('.stock-item[data-market="' + market + '"]');
+            items.forEach(item => {
+                const price = parseFloat(item.getAttribute('data-price') || '0');
+                const sharesEl = item.querySelector('.calc-shares');
+                if (sharesEl && price > 0) {
+                    const shares = Math.max(1, Math.floor(budget / price));
+                    sharesEl.innerText = shares.toLocaleString();
+                }
+            });
+        }
+
+        function initBudgetCalc() {
+            ['tw', 'us'].forEach(market => {
+                const inputId = 'budget-' + market + '-input';
+                const inputEl = document.getElementById(inputId);
+                if (inputEl) {
+                    try {
+                        const saved = localStorage.getItem('tqa_budget_' + market);
+                        if (saved) {
+                            inputEl.value = saved;
+                        }
+                    } catch (e) {}
+                    updateBudgetCalc(market);
+                }
+            });
+        }
+
+        // 頁面載入時初始化台股淨值圖與預算試算
         window.addEventListener('DOMContentLoaded', () => {
             twEquityChart = initEquityChart('tw-equity-chart', 'tw-equity-hud', EQUITY_CURVE_TW, true);
+            initBudgetCalc();
         });
 
         // ================= 自動熱更新機制 (背景定時檢查 + 喚醒比對) =================
@@ -1127,11 +1188,14 @@ class WebDashboardGenerator:
         for idx, row in top_df.iterrows():
             ticker = row["ticker"]
             name = TECH_UNIVERSE_TW.get(ticker, ticker) if is_tw else ticker
-            price = row.get("price", row.get("close", 0.0))
-            roc20 = row.get("roc_20d", row.get("roc_20", 0.0))
-            score = row.get("score", row.get("composite_score", 0.0))
+            price = float(row.get("price", row.get("close", 0.0)))
+            roc20 = float(row.get("roc_20d", row.get("roc_20", 0.0)))
+            score = float(row.get("score", row.get("composite_score", 0.0)))
             above50 = bool(row.get("above_50sma", False))
             prefix = "NT$" if is_tw else "$"
+            market_tag = "tw" if is_tw else "us"
+            stop_price = price * 0.92
+            stop_price_str = f"NT${stop_price:,.1f}" if is_tw else f"${stop_price:,.2f}"
             
             roc_color = "#34d399" if roc20 >= 0 else "#f87171"
             roc_sign = "+" if roc20 >= 0 else ""
@@ -1146,12 +1210,15 @@ class WebDashboardGenerator:
                 """
             
             item_html = f"""
-            <div onclick="openStockModal('{ticker}')" class="stock-item">
+            <div onclick="openStockModal('{ticker}')" class="stock-item" data-price="{price}" data-market="{market_tag}">
                 <div class="stock-left">
                     <span class="rank-num">#{idx + 1}</span>
                     <div>
                         <div class="stock-name">{name}</div>
                         <div class="stock-sub">{ticker} • 綜合分: {score:.1f}</div>
+                        <div style="margin-top: 4px; font-size: 11px; font-family: monospace; color: #94a3b8;">
+                            建議買進: <span class="calc-shares" style="color: #38bdf8; font-weight: bold;">--</span> 股 • <span style="color: #cbd5e1;">-8%停損:</span> <span style="color: #f87171; font-weight: 600;">{stop_price_str}</span>
+                        </div>
                     </div>
                 </div>
                 <div style="text-align: right;">
