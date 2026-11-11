@@ -47,7 +47,27 @@ class TechFeatureEngine:
         rs = gain / (loss + 1e-9)
         data["rsi_14"] = 100 - (100 / (1 + rs))
         
-        # 6. 綜合動能評分 (權重: 20日 40%, 60日 40%, 120日 20%)
+        # 6. KD (9, 3, 3) 隨機指標計算
+        low_9 = low.rolling(window=9).min()
+        high_9 = high.rolling(window=9).max()
+        rsv = ((close - low_9) / (high_9 - low_9).replace(0, np.nan)) * 100
+        rsv = rsv.fillna(50)
+        
+        k_list, d_list = [], []
+        k, d = 50.0, 50.0
+        for val in rsv:
+            k = (2.0 / 3.0) * k + (1.0 / 3.0) * val
+            d = (2.0 / 3.0) * d + (1.0 / 3.0) * k
+            k_list.append(round(k, 2))
+            d_list.append(round(d, 2))
+            
+        data["k_9"] = k_list
+        data["d_9"] = d_list
+        
+        # 7. 20MA (月線)
+        data["sma_20"] = close.rolling(window=20).mean()
+
+        # 8. 綜合動能評分 (權重: 20日 40%, 60日 40%, 120日 20%)
         data["momentum_score"] = (
             data["roc_20"].fillna(0) * 0.4 +
             data["roc_60"].fillna(0) * 0.4 +
@@ -80,6 +100,8 @@ class TechFeatureEngine:
                 "above_50sma": bool(latest["above_50sma"]),
                 "above_200sma": bool(latest["above_200sma"]),
                 "rsi": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
+                "k9": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
+                "d9": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
                 "is_breakout": bool(latest["is_new_high_20d"]),
             }
             

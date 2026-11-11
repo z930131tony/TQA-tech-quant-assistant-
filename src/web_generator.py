@@ -1,5 +1,5 @@
 """
-極速響應式自適應儀表板生成模組 (具備 X 軸磁吸、手指左右拖曳看盤、頂部 HUD 抬頭顯示與十字準星)
+專業看盤級自適應儀表板生成模組 (整合 TradingView Lightweight Charts：支援完整 K 棒、成交量、20MA/50MA 均線與 KD 隨機指標)
 """
 import os
 import json
@@ -15,7 +15,8 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>TQA 科技量化策略儀表板</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- TradingView Lightweight Charts (45KB 專業金融 K 線圖表庫) -->
+    <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 50px; }
@@ -82,19 +83,23 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         /* 彈窗樣式 */
         .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.75); display: none; align-items: flex-end; justify-content: center; }
         @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 20px; } }
-        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 16px 16px 0 0; width: 100%; max-width: 680px; padding: 20px; max-height: 90vh; overflow-y: auto; }
+        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 16px 16px 0 0; width: 100%; max-width: 760px; padding: 20px; max-height: 92vh; overflow-y: auto; }
         @media (min-width: 640px) { .modal-box { border-radius: 16px; } }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 12px; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 10px; }
         .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
         .close-btn:hover { background: #334155; color: #fff; }
         
-        /* 頂部動態抬頭資訊 HUD (手指滑動時資料即時同步此處，絕不遮擋視線) */
-        .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+        /* 頂部動態抬頭資訊 HUD (顯示詳細開高低收、量、KD、均線) */
+        .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 11px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+        .hud-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         .hud-val { font-weight: bold; }
         
-        /* 圖表高度自適應與觸控拖曳鎖定 */
-        .chart-box { height: 220px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; padding: 8px; touch-action: none; }
-        @media (min-width: 640px) { .chart-box { height: 280px; } }
+        /* 專業看盤圖表容器 (支援 K 棒 + 均線 + 成交量) */
+        .chart-box { height: 260px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; overflow: hidden; }
+        @media (min-width: 640px) { .chart-box { height: 310px; } }
+        
+        /* KD 指標子圖容器 */
+        .kd-chart-box { height: 100px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; margin-top: 8px; overflow: hidden; }
         
         .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; text-align: center; font-family: monospace; }
         @media (min-width: 640px) { .factor-grid { grid-template-columns: repeat(6, 1fr); } }
@@ -138,7 +143,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             <span class="card-title">大戶投操作指引</span>
                             <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
                         </div>
-                        <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看走勢圖)</div>
+                        <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
                         <div>__TW_RECOMMENDATIONS__</div>
                     </div>
 
@@ -176,7 +181,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                     <th class="text-right">最新價</th>
                                     <th class="text-right">20日動能</th>
                                     <th class="text-right desktop-only">60日動能</th>
-                                    <th class="text-right desktop-only">14日RSI</th>
+                                    <th class="text-right desktop-only">KD (9,3)</th>
                                     <th class="text-right">綜合分</th>
                                     <th class="text-center">狀態</th>
                                 </tr>
@@ -197,7 +202,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             <span class="card-title">複委託操作指引</span>
                             <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
                         </div>
-                        <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看走勢圖)</div>
+                        <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
                         <div>__US_RECOMMENDATIONS__</div>
                     </div>
 
@@ -235,7 +240,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                     <th class="text-right">最新價</th>
                                     <th class="text-right">20日動能</th>
                                     <th class="text-right desktop-only">60日動能</th>
-                                    <th class="text-right desktop-only">14日RSI</th>
+                                    <th class="text-right desktop-only">KD (9,3)</th>
                                     <th class="text-right">綜合分</th>
                                     <th class="text-center">狀態</th>
                                 </tr>
@@ -252,7 +257,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- ================= 彈出視窗 (Modal) ================= -->
+    <!-- ================= 專業看盤彈出視窗 (Modal) ================= -->
     <div id="stock-modal" class="modal-overlay" onclick="handleOverlayClick(event)">
         <div class="modal-box" onclick="event.stopPropagation()">
             <div class="modal-header">
@@ -267,19 +272,33 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 <button class="close-btn" onclick="closeStockModal()">✕</button>
             </div>
 
-            <!-- 圖表抬頭即時 HUD 數據欄 (手指在圖上滑動，這裡即時跳出數據，不遮擋視線) -->
+            <!-- 即時 HUD：開高低收、均線、成交量與 KD -->
             <div id="chart-hud" class="chart-hud">
-                <span id="hud-date" style="color: #cbd5e1;">📅 --</span>
-                <span id="hud-price" style="color: #38bdf8;">股價: --</span>
-                <span id="hud-sma" style="color: #fbbf24;">50MA: --</span>
+                <div class="hud-row">
+                    <span id="hud-date" style="color: #cbd5e1;">📅 日期: --</span>
+                    <span id="hud-ohlc" style="color: #94a3b8;">開: -- 高: -- 低: -- 收: --</span>
+                </div>
+                <div class="hud-row" style="border-top: 1px dashed #1e293b; padding-top: 4px;">
+                    <span id="hud-ma" style="color: #fbbf24;">20MA: -- | 50MA: --</span>
+                    <span id="hud-kd" style="color: #38bdf8;">K: -- | D: --</span>
+                </div>
             </div>
 
-            <!-- 圖表容器 (支援手機觸控滑動) -->
-            <div class="chart-box">
-                <canvas id="modalChart"></canvas>
+            <!-- K 線主圖 (Candlestick + 20MA/50MA 均線 + 成交量) -->
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#64748b; margin-bottom:4px;">
+                <span>日 K 棒 + 20MA(紫) + 50MA生命線(黃)</span>
+                <span>手指拖曳滑動可十字看盤 / 雙指可縮放</span>
             </div>
+            <div id="mainChartContainer" class="chart-box"></div>
 
-            <!-- 因子數據 -->
+            <!-- KD (9, 3, 3) 隨機指標子圖 -->
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#64748b; margin-top:10px; margin-bottom:4px;">
+                <span>KD (9, 3, 3) 指標 ➔ <span style="color:#38bdf8">K值(藍)</span> / <span style="color:#f97316">D值(橘)</span></span>
+                <span id="kd-status-tag" style="font-family:monospace; color:#cbd5e1;">-</span>
+            </div>
+            <div id="kdChartContainer" class="kd-chart-box"></div>
+
+            <!-- 六大因子數據卡片 -->
             <div class="factor-grid">
                 <div class="factor-card">
                     <div style="font-size: 10px; color: #64748b;">20日動能</div>
@@ -290,10 +309,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     <div id="modal-roc60" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">120日動能</div>
-                    <div id="modal-roc120" style="font-size: 13px; font-weight: bold;">-</div>
-                </div>
-                <div class="factor-card">
                     <div style="font-size: 10px; color: #64748b;">50MA乖離</div>
                     <div id="modal-bias50" style="font-size: 13px; font-weight: bold;">-</div>
                 </div>
@@ -302,20 +317,31 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     <div id="modal-rsi" style="font-size: 13px; font-weight: bold; color: #cbd5e1;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">20日破高</div>
-                    <div id="modal-breakout" style="font-size: 13px; font-weight: bold;">-</div>
+                    <div style="font-size: 10px; color: #64748b;">K (9)</div>
+                    <div id="modal-k9" style="font-size: 13px; font-weight: bold; color: #38bdf8;">-</div>
+                </div>
+                <div class="factor-card">
+                    <div style="font-size: 10px; color: #64748b;">D (9)</div>
+                    <div id="modal-d9" style="font-size: 13px; font-weight: bold; color: #f97316;">-</div>
                 </div>
             </div>
 
             <a id="modal-ext-link" href="#" target="_blank" rel="noopener noreferrer" class="btn-link">
-                在新視窗開啟即時盤口 ↗
+                在新視窗開啟即時完整盤口 ↗
             </a>
         </div>
     </div>
 
     <script>
         const STOCKS_DATABASE = __STOCKS_DATABASE_JSON__;
-        let chartInstance = null;
+        let mainChart = null;
+        let kdChart = null;
+        let candleSeries = null;
+        let volumeSeries = null;
+        let sma20Series = null;
+        let sma50Series = null;
+        let kSeries = null;
+        let dSeries = null;
         let currentStockData = null;
 
         function switchTab(market) {
@@ -337,18 +363,28 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        function updateHUD(date, price, sma, isTw) {
+        function updateHUDByItem(item, isTw) {
+            if (!item) return;
             const curr = isTw ? 'NT$' : '$';
-            document.getElementById('hud-date').innerHTML = '📅 <b>' + date + '</b>';
-            document.getElementById('hud-price').innerHTML = '股價: <b style="color:#38bdf8;">' + curr + price.toFixed(2) + '</b>';
+            document.getElementById('hud-date').innerHTML = '📅 <b>' + item.time + '</b>';
             
-            if (sma !== null && sma !== undefined) {
-                const bias = ((price - sma) / sma) * 100;
-                const biasColor = bias >= 0 ? '#34d399' : '#f87171';
-                document.getElementById('hud-sma').innerHTML = '50MA: <b style="color:#fbbf24;">' + curr + sma.toFixed(2) + '</b> <span style="color:' + biasColor + ';">(' + (bias >= 0 ? '+' : '') + bias.toFixed(1) + '%)</span>';
-            } else {
-                document.getElementById('hud-sma').innerText = '50MA: --';
-            }
+            const isUp = item.close >= item.open;
+            const color = isUp ? '#34d399' : '#f87171';
+            document.getElementById('hud-ohlc').innerHTML = 
+                '開 <b style="color:' + color + ';">' + item.open.toFixed(2) + '</b> ' +
+                '高 <b>' + item.high.toFixed(2) + '</b> ' +
+                '低 <b>' + item.low.toFixed(2) + '</b> ' +
+                '收 <b style="color:' + color + ';">' + item.close.toFixed(2) + '</b>';
+
+            const sma20 = item.sma20 ? item.sma20.toFixed(2) : '--';
+            const sma50 = item.sma50 ? item.sma50.toFixed(2) : '--';
+            document.getElementById('hud-ma').innerHTML = 
+                '<span style="color:#c084fc;">20MA: ' + sma20 + '</span> | <span style="color:#fbbf24;">50MA: ' + sma50 + '</span>';
+
+            const kVal = item.k ? item.k.toFixed(1) : '--';
+            const dVal = item.d ? item.d.toFixed(1) : '--';
+            document.getElementById('hud-kd').innerHTML = 
+                '<span style="color:#38bdf8;">K: ' + kVal + '</span> | <span style="color:#f97316;">D: ' + dVal + '</span>';
         }
 
         function openStockModal(ticker) {
@@ -377,14 +413,18 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             setVal('modal-roc20', data.roc_20d);
             setVal('modal-roc60', data.roc_60d);
-            setVal('modal-roc120', data.roc_120d);
             setVal('modal-bias50', data.bias_50sma);
-
             document.getElementById('modal-rsi').innerText = data.rsi.toFixed(1);
+            document.getElementById('modal-k9').innerText = data.latest_k.toFixed(1);
+            document.getElementById('modal-d9').innerText = data.latest_d.toFixed(1);
 
-            const breakoutEl = document.getElementById('modal-breakout');
-            breakoutEl.innerText = data.is_breakout ? '創20日新高' : '否';
-            breakoutEl.style.color = data.is_breakout ? '#fbbf24' : '#64748b';
+            // KD 狀態判定標籤
+            const kdTag = document.getElementById('kd-status-tag');
+            if (data.latest_k > data.latest_d) {
+                kdTag.innerHTML = '<span style="color:#34d399">▲ K > D 多方掌握</span>';
+            } else {
+                kdTag.innerHTML = '<span style="color:#f87171">▼ K < D 空方承壓</span>';
+            }
 
             const extLink = document.getElementById('modal-ext-link');
             if (data.is_tw) {
@@ -394,14 +434,25 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 extLink.href = 'https://www.tradingview.com/symbols/' + data.symbol + '/';
             }
 
-            // 預設 HUD 顯示最後一筆（最新）收盤數據
-            const lastIdx = data.chart_dates.length - 1;
-            updateHUD(data.chart_dates[lastIdx], data.chart_prices[lastIdx], data.chart_sma50[lastIdx], data.is_tw);
-
-            updateChartFast(data);
+            // 預設更新 HUD 顯示最新數據
+            const lastCandle = data.candles[data.candles.length - 1];
+            updateHUDByItem({
+                time: lastCandle.time,
+                open: lastCandle.open,
+                high: lastCandle.high,
+                low: lastCandle.low,
+                close: lastCandle.close,
+                sma20: data.sma20.length ? data.sma20[data.sma20.length - 1].value : null,
+                sma50: data.sma50.length ? data.sma50[data.sma50.length - 1].value : null,
+                k: data.kd_k.length ? data.kd_k[data.kd_k.length - 1].value : null,
+                d: data.kd_d.length ? data.kd_d[data.kd_d.length - 1].value : null
+            }, data.is_tw);
 
             const modal = document.getElementById('stock-modal');
             modal.style.display = 'flex';
+
+            // 渲染 TradingView 專業 K 棒與 KD 圖表
+            renderTradingViewCharts(data);
         }
 
         function closeStockModal() {
@@ -414,106 +465,140 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
 
-        // 十字垂直準星線插件
-        const verticalLinePlugin = {
-            id: 'verticalLine',
-            afterDraw: (chart) => {
-                if (chart.tooltip && chart.tooltip._active && chart.tooltip._active.length) {
-                    const activePoint = chart.tooltip._active[0];
-                    const ctx = chart.ctx;
-                    const x = activePoint.element.x;
-                    const topY = chart.scales.y.top;
-                    const bottomY = chart.scales.y.bottom;
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.moveTo(x, topY);
-                    ctx.lineTo(x, bottomY);
-                    ctx.lineWidth = 1;
-                    ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
-                    ctx.setLineDash([3, 3]);
-                    ctx.stroke();
-                    ctx.restore();
-                }
-            }
-        };
+        function renderTradingViewCharts(data) {
+            const mainContainer = document.getElementById('mainChartContainer');
+            const kdContainer = document.getElementById('kdChartContainer');
 
-        function updateChartFast(data) {
-            const ctx = document.getElementById('modalChart').getContext('2d');
-            
-            if (!chartInstance) {
-                chartInstance = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: data.chart_dates,
-                        datasets: [
-                            {
-                                data: data.chart_prices,
-                                borderColor: '#38bdf8',
-                                borderWidth: 2,
-                                pointRadius: 0,
-                                pointHoverRadius: 4,
-                                pointHoverBackgroundColor: '#38bdf8',
-                                fill: false,
-                                tension: 0.1
-                            },
-                            {
-                                data: data.chart_sma50,
-                                borderColor: '#fbbf24',
-                                borderWidth: 1.5,
-                                borderDash: [4, 4],
-                                pointRadius: 0,
-                                pointHoverRadius: 0,
-                                fill: false,
-                                tension: 0.1
-                            }
-                        ]
-                    },
-                    plugins: [verticalLinePlugin],
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        animation: false,
-                        // 核心：X 軸磁吸感應 (只要在同一個垂直位置即可觸發，不用對準點)
-                        interaction: {
-                            mode: 'index',
-                            intersect: false,
-                            axis: 'x'
-                        },
-                        events: ['mousemove', 'mouseout', 'click', 'touchstart', 'touchmove'],
-                        onHover: (event, activeElements) => {
-                            if (activeElements && activeElements.length > 0 && currentStockData) {
-                                const idx = activeElements[0].index;
-                                updateHUD(
-                                    currentStockData.chart_dates[idx],
-                                    currentStockData.chart_prices[idx],
-                                    currentStockData.chart_sma50[idx],
-                                    currentStockData.is_tw
-                                );
-                            }
-                        },
-                        plugins: {
-                            legend: { display: false },
-                            tooltip: {
-                                enabled: true,
-                                backgroundColor: '#1e293b',
-                                titleColor: '#94a3b8',
-                                bodyColor: '#f1f5f9',
-                                bodyFont: { family: 'monospace' },
-                                displayColors: false
-                            }
-                        },
-                        scales: {
-                            x: { grid: { display: false }, ticks: { color: '#64748b', maxTicksLimit: 8, font: { size: 10 } } },
-                            y: { grid: { color: '#1e293b' }, ticks: { color: '#94a3b8', font: { size: 10, family: 'monospace' } } }
-                        }
+            // 確保容器清空重建以獲得最佳尺寸適配
+            mainContainer.innerHTML = '';
+            kdContainer.innerHTML = '';
+
+            const commonOptions = {
+                layout: {
+                    background: { color: '#0b0f19' },
+                    textColor: '#94a3b8',
+                    fontSize: 10
+                },
+                grid: {
+                    vertLines: { color: '#182238' },
+                    horzLines: { color: '#182238' }
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 },
+                    horzLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 }
+                },
+                rightPriceScale: {
+                    borderColor: '#1e293b'
+                },
+                timeScale: {
+                    borderColor: '#1e293b',
+                    timeVisible: false
+                }
+            };
+
+            // 1. 建立主圖 (K 線 + 成交量 + 20MA/50MA)
+            mainChart = LightweightCharts.createChart(mainContainer, {
+                ...commonOptions,
+                height: mainContainer.clientHeight || 260
+            });
+
+            // K 棒系列 (漲: 綠色 #34d399, 跌: 紅色 #f87171)
+            candleSeries = mainChart.addCandlestickSeries({
+                upColor: '#34d399',
+                downColor: '#f87171',
+                borderVisible: false,
+                wickUpColor: '#34d399',
+                wickDownColor: '#f87171'
+            });
+            candleSeries.setData(data.candles);
+
+            // 20MA 月線 (紫色)
+            sma20Series = mainChart.addLineSeries({
+                color: '#c084fc',
+                lineWidth: 1.5,
+                crosshairMarkerVisible: false
+            });
+            sma20Series.setData(data.sma20);
+
+            // 50MA 季線/生命線 (黃色)
+            sma50Series = mainChart.addLineSeries({
+                color: '#fbbf24',
+                lineWidth: 1.8,
+                crosshairMarkerVisible: false
+            });
+            sma50Series.setData(data.sma50);
+
+            // 成交量副圖
+            volumeSeries = mainChart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: '',
+                scaleMargins: { top: 0.8, bottom: 0 }
+            });
+            volumeSeries.setData(data.volume);
+
+            // 2. 建立 KD (9, 3, 3) 子圖
+            kdChart = LightweightCharts.createChart(kdContainer, {
+                ...commonOptions,
+                height: kdContainer.clientHeight || 100
+            });
+
+            // 80/20 超買超賣參考線
+            const upperRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.2)', lineWidth: 1, lineStyle: 2 });
+            const lowerRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.2)', lineWidth: 1, lineStyle: 2 });
+            upperRef.setData(data.candles.map(c => ({ time: c.time, value: 80 })));
+            lowerRef.setData(data.candles.map(c => ({ time: c.time, value: 20 })));
+
+            // K 線 (藍色)
+            kSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1.6, crosshairMarkerVisible: false });
+            kSeries.setData(data.kd_k);
+
+            // D 線 (橘色)
+            dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.6, crosshairMarkerVisible: false });
+            dSeries.setData(data.kd_d);
+
+            // 3. 雙圖聯動 crosshair 移動監聽 (滑動時同步更新 HUD 抬頭)
+            const candleMap = {};
+            data.candles.forEach(c => candleMap[c.time] = c);
+            const sma20Map = {};
+            data.sma20.forEach(s => sma20Map[s.time] = s.value);
+            const sma50Map = {};
+            data.sma50.forEach(s => sma50Map[s.time] = s.value);
+            const kMap = {};
+            data.kd_k.forEach(k => kMap[k.time] = k.value);
+            const dMap = {};
+            data.kd_d.forEach(d => dMap[d.time] = d.value);
+
+            mainChart.subscribeCrosshairMove(param => {
+                if (param.time) {
+                    const c = candleMap[param.time];
+                    if (c) {
+                        updateHUDByItem({
+                            time: c.time,
+                            open: c.open,
+                            high: c.high,
+                            low: c.low,
+                            close: c.close,
+                            sma20: sma20Map[param.time] || null,
+                            sma50: sma50Map[param.time] || null,
+                            k: kMap[param.time] || null,
+                            d: dMap[param.time] || null
+                        }, data.is_tw);
                     }
-                });
-            } else {
-                chartInstance.data.labels = data.chart_dates;
-                chartInstance.data.datasets[0].data = data.chart_prices;
-                chartInstance.data.datasets[1].data = data.chart_sma50;
-                chartInstance.update('none');
-            }
+                }
+            });
+
+            // 自適應調整可視範圍
+            mainChart.timeScale().fitContent();
+            kdChart.timeScale().fitContent();
+
+            // 雙圖時間軸連動滾動縮放
+            mainChart.timeScale().subscribeVisibleTimeRangeChange(range => {
+                kdChart.timeScale().setVisibleRange(range);
+            });
+            kdChart.timeScale().subscribeVisibleTimeRangeChange(range => {
+                mainChart.timeScale().setVisibleRange(range);
+            });
         }
     </script>
 </body>
@@ -561,7 +646,8 @@ class WebDashboardGenerator:
             price = row["price"]
             roc20 = row["roc_20d"]
             roc60 = row["roc_60d"]
-            rsi = row["rsi"]
+            k9 = row.get("k9", 50.0)
+            d9 = row.get("d9", 50.0)
             score = row["score"]
             above_50 = row["above_50sma"]
 
@@ -580,7 +666,7 @@ class WebDashboardGenerator:
                 <td class="text-right font-mono" style="font-weight: 600;">{currency}{price:,.2f}</td>
                 <td class="text-right font-mono {roc_class}">{roc20:+.2f}%</td>
                 <td class="text-right font-mono {roc60_class} desktop-only">{roc60:+.2f}%</td>
-                <td class="text-right font-mono desktop-only" style="color: #cbd5e1;">{rsi:.1f}</td>
+                <td class="text-right font-mono desktop-only" style="color: #38bdf8;">{k9:.1f}/{d9:.1f}</td>
                 <td class="text-right font-mono" style="font-weight: bold; color: #38bdf8;">{score:+.1f}</td>
                 <td class="text-center">{status_badge}</td>
             </tr>
@@ -595,7 +681,7 @@ class WebDashboardGenerator:
         db = {}
         for ticker, raw_df in dataset.items():
             enriched = TechFeatureEngine.calculate_technical_features(raw_df)
-            sub = enriched.tail(60)
+            sub = enriched.tail(90)  # 取近 90 交易日繪製完整 K 線與 KD
             
             latest = enriched.iloc[-1]
             is_tw = (".TW" in ticker) or (".TWO" in ticker)
@@ -605,9 +691,36 @@ class WebDashboardGenerator:
             sma50_val = float(latest["sma_50"]) if not np.isnan(latest["sma_50"]) else curr_price
             bias_50 = ((curr_price - sma50_val) / sma50_val) * 100
 
-            dates = [d.strftime("%m-%d") for d in sub.index]
-            prices = [round(float(p), 2) for p in sub["close"]]
-            sma50_series = [round(float(m), 2) if not np.isnan(m) else None for m in sub["sma_50"]]
+            candles = []
+            volumes = []
+            sma20_list = []
+            sma50_list = []
+            kd_k_list = []
+            kd_d_list = []
+
+            for d, row in sub.iterrows():
+                date_str = d.strftime("%Y-%m-%d")
+                o = round(float(row["open"]), 2)
+                h = round(float(row["high"]), 2)
+                l = round(float(row["low"]), 2)
+                c = round(float(row["close"]), 2)
+                v = int(row["volume"])
+
+                candles.append({"time": date_str, "open": o, "high": h, "low": l, "close": c})
+                volumes.append({
+                    "time": date_str,
+                    "value": v,
+                    "color": "rgba(52, 211, 153, 0.35)" if c >= o else "rgba(248, 113, 113, 0.35)"
+                })
+
+                if not np.isnan(row.get("sma_20", np.nan)):
+                    sma20_list.append({"time": date_str, "value": round(float(row["sma_20"]), 2)})
+                if not np.isnan(row.get("sma_50", np.nan)):
+                    sma50_list.append({"time": date_str, "value": round(float(row["sma_50"]), 2)})
+                if not np.isnan(row.get("k_9", np.nan)):
+                    kd_k_list.append({"time": date_str, "value": round(float(row["k_9"]), 2)})
+                if not np.isnan(row.get("d_9", np.nan)):
+                    kd_d_list.append({"time": date_str, "value": round(float(row["d_9"]), 2)})
 
             db[ticker] = {
                 "ticker": ticker,
@@ -618,13 +731,16 @@ class WebDashboardGenerator:
                 "above_50sma": bool(latest["above_50sma"]),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
-                "roc_120d": round(float(latest["roc_120"]), 2) if not np.isnan(latest["roc_120"]) else 0.0,
                 "bias_50sma": round(bias_50, 2),
                 "rsi": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
-                "is_breakout": bool(latest["is_new_high_20d"]),
-                "chart_dates": dates,
-                "chart_prices": prices,
-                "chart_sma50": sma50_series
+                "latest_k": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
+                "latest_d": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
+                "candles": candles,
+                "volume": volumes,
+                "sma20": sma20_list,
+                "sma50": sma50_list,
+                "kd_k": kd_k_list,
+                "kd_d": kd_d_list
             }
 
         return json.dumps(db, ensure_ascii=False)
@@ -673,4 +789,4 @@ class WebDashboardGenerator:
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"網頁磁吸拖曳版生成完成：{output_path}")
+        print(f"K線與KD看盤版網頁已成功生成：{output_path}")
