@@ -269,7 +269,7 @@ class TechBacktester:
             win_rate = (profitable / len(trades_df)) * 100
 
         # 計算基準報酬 (台股 0052.TW，美股 QQQ)
-        bench_ticker = "0052.TW" if market == "TW" else "QQQ"
+        bench_ticker = "0050.TW" if market == "TW" else "QQQ"
         bench_return = 0.0
         if bench_ticker in self.dataset:
             b_df = self.dataset[bench_ticker]

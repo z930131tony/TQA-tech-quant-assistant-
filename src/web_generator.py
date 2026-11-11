@@ -260,7 +260,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                 <div class="grid-val green">__TW_CAGR__</div>
                             </div>
                             <div class="grid-item">
-                                <div class="grid-label">同期基準 (0052)</div>
+                                <div class="grid-label">同期基準 (0050)</div>
                                 <div class="grid-val red">__TW_BENCHMARK__</div>
                             </div>
                             <div class="grid-item">
@@ -278,7 +278,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                         <span style="display: inline-block; width: 10px; height: 10px; background: #38bdf8; border-radius: 2px;"></span> 策略淨值
                                     </span>
                                     <span style="display: flex; align-items: center; gap: 5px; color: #94a3b8;">
-                                        <span style="display: inline-block; width: 12px; height: 2px; background: #94a3b8; border-top: 1px dashed #94a3b8;"></span> 0052基準
+                                        <span style="display: inline-block; width: 12px; height: 2px; background: #94a3b8; border-top: 1px dashed #94a3b8;"></span> 0050基準
                                     </span>
                                 </div>
                             </div>
@@ -581,7 +581,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             curveData.benchmark.forEach(p => benchMap[p.time] = p.value);
 
             const hudEl = document.getElementById(hudId);
-            const benchName = isTw ? '0052' : 'QQQ';
+            const benchName = isTw ? '0050' : 'QQQ';
             const updateHud = (timeStr) => {
                 if (!hudEl) return;
                 const sVal = stratMap[timeStr];
@@ -1165,7 +1165,7 @@ class WebDashboardGenerator:
 
     @staticmethod
     def build_equity_curve_data(perf_df: pd.DataFrame, dataset: Dict[str, pd.DataFrame], bench_ticker: str) -> dict:
-        """生成策略資產淨值與對應基準 ETF (0052/QQQ) 之等權起點對比序列"""
+        """生成策略資產淨值與對應基準 ETF (0050/QQQ) 之等權起點對比序列"""
         if perf_df.empty:
             return {"strategy": [], "benchmark": []}
         
@@ -1342,7 +1342,7 @@ class WebDashboardGenerator:
         us_portfolio_html = PortfolioTracker.generate_portfolio_html(portfolio_positions, "US")
 
         # 5. 回測淨值曲線數據 (Area Chart vs Benchmark)
-        tw_equity_curve = cls.build_equity_curve_data(tw_backtest.get("perf_df", pd.DataFrame()), dataset, "0052.TW")
+        tw_equity_curve = cls.build_equity_curve_data(tw_backtest.get("perf_df", pd.DataFrame()), dataset, "0050.TW")
         us_equity_curve = cls.build_equity_curve_data(us_backtest.get("perf_df", pd.DataFrame()), dataset, "QQQ")
         tw_equity_json = json.dumps(tw_equity_curve, ensure_ascii=False)
         us_equity_json = json.dumps(us_equity_curve, ensure_ascii=False)
