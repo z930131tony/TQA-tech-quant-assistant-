@@ -1,13 +1,25 @@
 name: Tech Quant Daily Scheduler & Webpage Deploy
 
-# 定時排程：每天在台股開盤前 (UTC 00:30 = 台灣 08:30) 與美股開盤前 (UTC 13:00 = 台灣 21:00) 自動執行
+# 定時排程：
+# 1. 台股收盤排程：週一至週五 台灣 14:30 (UTC 06:30)，收盤後一小時結算與晨盤推播
+# 2. 美股夏令收盤排程：週一至週五 台灣 05:15 (UTC 21:15)，夏令收盤後15分鐘結算
+# 3. 美股冬令收盤排程：週一至週五 台灣 06:15 (UTC 22:15)，冬令收盤後15分鐘結算
 on:
   schedule:
-    - cron: '30 0 * * 1-5'   # 週一至週五 台灣 08:30 (台股開盤前晨間推播)
-    - cron: '0 15 * * 1-5'   # 週一至週五 台灣 23:00 (美股冬令開盤後半小時晚間推播)
-  push:
-    branches: [ main ]       # 每次推送到 main 分支時也自動執行
-  workflow_dispatch:         # 支援隨時手動點擊「Run workflow」立即測試
+    - cron: '30 6 * * 1-5'    # 台股收盤結算 (台灣 14:30 / UTC 06:30)
+    - cron: '15 21 * * 1-5'   # 美股夏令收盤結算 (台灣 05:15 / UTC 21:15)
+    - cron: '15 22 * * 1-5'   # 美股冬令收盤結算 (台灣 06:15 / UTC 22:15)
+  workflow_dispatch:          # 支援 GitHub 網頁手動觸發執行
+    inputs:
+      market:
+        description: '選擇執行市場 (AUTO, TW, US)'
+        required: false
+        default: 'AUTO'
+        type: choice
+        options:
+          - AUTO
+          - TW
+          - US
 
 permissions:
   contents: write
@@ -18,6 +30,8 @@ jobs:
     steps:
       - name: 簽出專案代碼 (Checkout)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 設定 Python 3.12 環境
         uses: actions/setup-python@v5
@@ -35,12 +49,13 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
         run: |
-          python run_daily.py
+          python run_daily.py --market ${{ github.event.inputs.market || 'AUTO' }}
 
       - name: 提交更新後的檔案至 main 分支
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Actions"
+          git pull --rebase origin main || true
           git add index.html portfolio.json
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore(auto): 自動更新股市數據與儀表板 [skip ci]" && git push origin main)
 

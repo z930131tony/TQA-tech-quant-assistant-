@@ -3,6 +3,7 @@
 """
 import yfinance as yf
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 import os
@@ -13,6 +14,49 @@ class TechDataLoader:
     def __init__(self, cache_dir: str = "data_cache"):
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
+
+    def fetch_finmind_taiwan_stock(self, ticker: str, days: Optional[int] = None) -> Optional[pd.DataFrame]:
+        """
+        透過 FinMind 開放 API 抓取台股除權息還原之日 K 線資料 (防範 yfinance 假除權與 IP 封鎖)
+        """
+        clean_id = ticker.split(".")[0].strip()
+        lookback = days if days else config.lookback_days
+        start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
+        
+        url = "https://api.finmindtrade.com/api/v4/data"
+        params = {
+            "dataset": "TaiwanStockPrice",
+            "data_id": clean_id,
+            "start_date": start_date
+        }
+        
+        try:
+            resp = requests.get(url, params=params, timeout=12)
+            if resp.status_code != 200:
+                return None
+            raw_data = resp.json().get("data", [])
+            if not raw_data or len(raw_data) < 30:
+                return None
+                
+            df = pd.DataFrame(raw_data)
+            df = df.rename(columns={
+                "date": "date",
+                "open": "open",
+                "max": "high",
+                "min": "low",
+                "close": "close",
+                "Trading_Volume": "volume"
+            })
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date")
+            df["symbol"] = ticker
+            
+            numeric_cols = ["open", "high", "low", "close", "volume"]
+            df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            df = df.dropna(subset=["close"])
+            return df
+        except Exception:
+            return None
 
     def fetch_ticker_data(self, ticker: str, days: Optional[int] = None, force_refresh: bool = False, cache_only: bool = False) -> Optional[pd.DataFrame]:
         """
@@ -39,7 +83,16 @@ class TechDataLoader:
 
         lookback = days if days else config.lookback_days
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
-        
+
+        # 1. 若為台股標的，優先透過 FinMind 抓取乾淨還原日K (避免 yfinance 假除權與 IP 封鎖)
+        is_tw = (".TW" in ticker) or (".TWO" in ticker)
+        if is_tw:
+            df_fm = self.fetch_finmind_taiwan_stock(ticker, days=lookback)
+            if df_fm is not None and len(df_fm) >= 30:
+                df_fm.to_csv(cache_file)
+                return df_fm
+
+        # 2. 美股標的，或台股 FinMind 失敗時，走 yfinance 備援
         try:
             df = yf.download(
                 ticker, 

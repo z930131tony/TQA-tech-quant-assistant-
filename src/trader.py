@@ -34,10 +34,15 @@ class AutoTrader:
         self.trailing_stop_pct = trailing_stop_pct
         self.tw_tz = pytz.timezone("Asia/Taipei")
 
-    def execute_daily_simulation(self, tw_rank: pd.DataFrame, us_rank: pd.DataFrame) -> Tuple[List[str], List[Dict]]:
+    def execute_daily_simulation(
+        self, 
+        tw_rank: pd.DataFrame, 
+        us_rank: pd.DataFrame,
+        target_market: str = "ALL"
+    ) -> Tuple[List[str], List[Dict]]:
         """
         執行每日模擬下單流程：
-        1. 檢查現有部位停損平倉
+        1. 檢查現有部位停損平倉 (依 target_market 篩選市場)
         2. 檢查多頭環境與買進新標的
         3. 儲存 portfolio.json
         回傳: (交易報告文字清單, 最終部位清單)
@@ -54,6 +59,16 @@ class AutoTrader:
         # ----------------------------------------------------
         for pos in positions:
             ticker = pos["ticker"]
+            is_tw = (".TW" in ticker) or (".TWO" in ticker)
+            
+            # 若指定單一市場，非目標市場持股直接保留不處理
+            if target_market == "TW" and not is_tw:
+                kept_positions.append(pos)
+                continue
+            if target_market == "US" and is_tw:
+                kept_positions.append(pos)
+                continue
+
             if ticker not in self.dataset or self.dataset[ticker].empty:
                 kept_positions.append(pos)
                 continue
@@ -72,7 +87,6 @@ class AutoTrader:
 
             # 50MA
             sma50 = float(df["close"].rolling(50).mean().iloc[-1])
-            is_tw = (".TW" in ticker) or (".TWO" in ticker)
             prefix = "NT$" if is_tw else "$"
             name = TECH_UNIVERSE_TW.get(ticker, ticker)
 
@@ -95,53 +109,55 @@ class AutoTrader:
         # 步驟 2: 檢查市場環境與買進新標的 (Top 3)
         # ----------------------------------------------------
         # 2A. 台股市場
-        tw_top3 = tw_rank.head(3)
-        tw_bull_count = tw_top3["above_50sma"].sum()
-        if tw_bull_count >= 2:
-            # 多頭攻擊：買進未持有的前 3 強
-            for _, row in tw_top3.iterrows():
-                t = row["ticker"]
-                if t not in current_tickers and row["above_50sma"]:
-                    px = float(row["price"])
-                    shares = max(1, int(self.budget_tw / px))
-                    name = TECH_UNIVERSE_TW.get(t, t)
-                    kept_positions.append({
-                        "ticker": t,
-                        "shares": shares,
-                        "cost_price": px,
-                        "entry_date": today_str
-                    })
-                    current_tickers.add(t)
-                    trade_logs.append(f"🟢 【模擬買進委託】{name} ({t})\n   └ 股數: {shares} 股 (零股委託)\n   └ 進場價: NT${px:,.2f} (預算約 NT${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
-        else:
-            trade_logs.append("🛡️ 【台股風控保護】目前台股前三強僅 1 檔站上 50MA，處於保守防禦模式，今日不開新倉。")
+        if target_market in ["ALL", "TW"]:
+            tw_top3 = tw_rank.head(3)
+            tw_bull_count = tw_top3["above_50sma"].sum()
+            if tw_bull_count >= 2:
+                # 多頭攻擊：買進未持有的前 3 強
+                for _, row in tw_top3.iterrows():
+                    t = row["ticker"]
+                    if t not in current_tickers and row["above_50sma"]:
+                        px = float(row["price"])
+                        shares = max(1, int(self.budget_tw / px))
+                        name = TECH_UNIVERSE_TW.get(t, t)
+                        kept_positions.append({
+                            "ticker": t,
+                            "shares": shares,
+                            "cost_price": px,
+                            "entry_date": today_str
+                        })
+                        current_tickers.add(t)
+                        trade_logs.append(f"🟢 【模擬買進委託】{name} ({t})\n   └ 股數: {shares} 股 (零股委託)\n   └ 進場價: NT${px:,.2f} (預算約 NT${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
+            else:
+                trade_logs.append("🛡️ 【台股風控保護】目前台股前三強僅 1 檔站上 50MA，處於保守防禦模式，今日不開新倉。")
 
         # 2B. 美股市場
-        us_top3 = us_rank.head(3)
-        us_bull_count = us_top3["above_50sma"].sum()
-        qqq_df = self.dataset.get("QQQ")
-        qqq_bull = True
-        if qqq_df is not None and not qqq_df.empty:
-            q_close = float(qqq_df["close"].iloc[-1])
-            q_sma200 = float(qqq_df["close"].rolling(200).mean().iloc[-1])
-            qqq_bull = (q_close >= q_sma200)
+        if target_market in ["ALL", "US"]:
+            us_top3 = us_rank.head(3)
+            us_bull_count = us_top3["above_50sma"].sum()
+            qqq_df = self.dataset.get("QQQ")
+            qqq_bull = True
+            if qqq_df is not None and not qqq_df.empty:
+                q_close = float(qqq_df["close"].iloc[-1])
+                q_sma200 = float(qqq_df["close"].rolling(200).mean().iloc[-1])
+                qqq_bull = (q_close >= q_sma200)
 
-        if us_bull_count >= 2 and qqq_bull:
-            for _, row in us_top3.iterrows():
-                t = row["ticker"]
-                if t not in current_tickers and row["above_50sma"]:
-                    px = float(row["price"])
-                    shares = max(1, int(self.budget_us / px))
-                    kept_positions.append({
-                        "ticker": t,
-                        "shares": shares,
-                        "cost_price": px,
-                        "entry_date": today_str
-                    })
-                    current_tickers.add(t)
-                    trade_logs.append(f"🟢 【模擬買進委託】{t} (美股)\n   └ 股數: {shares} 股\n   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
-        else:
-            trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
+            if us_bull_count >= 2 and qqq_bull:
+                for _, row in us_top3.iterrows():
+                    t = row["ticker"]
+                    if t not in current_tickers and row["above_50sma"]:
+                        px = float(row["price"])
+                        shares = max(1, int(self.budget_us / px))
+                        kept_positions.append({
+                            "ticker": t,
+                            "shares": shares,
+                            "cost_price": px,
+                            "entry_date": today_str
+                        })
+                        current_tickers.add(t)
+                        trade_logs.append(f"🟢 【模擬買進委託】{t} (美股)\n   └ 股數: {shares} 股\n   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
+            else:
+                trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
 
         # 儲存回 portfolio.json
         PortfolioTracker.save_portfolio(kept_positions)
