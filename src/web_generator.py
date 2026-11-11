@@ -1,9 +1,12 @@
 """
-專業看盤級自適應儀表板生成模組
-特色：
-1. 完整修復 TradingView Lightweight Charts 鋪滿與對齊問題 (無右側空白、不擠在左側、KD嚴格連動)
-2. 響應式優化：手機窄螢幕與電腦寬螢幕皆具備大圖視角與清晰排版
-3. 整合個人持股與 8% 移動停利停損風控追蹤模組 (Portfolio & Risk Tracker)
+專業看盤級自適應儀表板生成模組 (全面除錯精修版)
+全面修復：
+1. 彈窗標題置頂鎖定 (position: sticky)，防止滾動時標題 (股票名稱/代碼) 被削掉
+2. K線與KD徹底消除左右留白與懸空，利用 setVisibleLogicalRange 精確鎖定在 [0, totalBars - 1]
+3. HUD 十字準星預設顯示最新收盤數值，滑鼠移開時自動歸位，不再卡在 5 月舊日期
+4. 修正 Windows 國旗 Emoji 渲染為「TW/US」破字問題，改用高質感純 CSS 徽章 (Market Pill)
+5. 介面層次重新優化：左側操作指引+績效，右側科技股評分排序，下方橫跨自訂庫存風控
+6. 本地 file:// 協定安全保護，避免 fetch 拋出跨域例外
 """
 import os
 import json
@@ -26,7 +29,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 60px; }
         
-        .container { width: 100%; max-width: 1400px; margin: 0 auto; padding: 16px 20px; }
+        .container { width: 100%; max-width: 1420px; margin: 0 auto; padding: 16px 20px; }
         
         header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
         .header-left { display: flex; align-items: center; gap: 12px; }
@@ -37,9 +40,13 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .update-label { font-size: 11px; color: #64748b; }
         .update-time { font-size: 13px; font-family: monospace; color: #cbd5e1; }
         
-        .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 16px 0 20px 0; }
-        .tab-btn { flex: 1; max-width: 240px; padding: 14px; background: none; border: none; color: #64748b; font-size: 16px; font-weight: 500; cursor: pointer; text-align: center; }
-        .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; font-weight: bold; }
+        .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 16px 0 20px 0; gap: 8px; }
+        .tab-btn { flex: 1; max-width: 240px; padding: 12px 16px; background: none; border: none; color: #64748b; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center; border-bottom: 3px solid transparent; transition: all 0.15s; }
+        .tab-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; }
+        
+        .market-pill { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-right: 6px; font-family: monospace; display: inline-block; vertical-align: middle; }
+        .tw-pill { background: #064e3b; color: #34d399; border: 1px solid #059669; }
+        .us-pill { background: #1e3a8a; color: #60a5fa; border: 1px solid #2563eb; }
         
         .desktop-grid { display: flex; flex-direction: column; gap: 20px; }
         @media (min-width: 992px) {
@@ -72,7 +79,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; font-size: 14px; }
         th { text-align: left; padding: 12px 10px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; white-space: nowrap; }
-        td { padding: 14px 10px; border-bottom: 1px solid #182238; white-space: nowrap; }
+        td { padding: 13px 10px; border-bottom: 1px solid #182238; white-space: nowrap; }
         tr.clickable { cursor: pointer; transition: background 0.1s; }
         tr.clickable:hover { background: #1a253c; }
         tr.clickable:active { background: #202e4a; }
@@ -85,29 +92,52 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .desktop-only { display: none; }
         @media (min-width: 768px) { .desktop-only { display: table-cell; } }
         
-        /* 彈窗樣式 (大螢幕寬廣、手機滿版好滑) */
+        /* 彈窗樣式 (完全防切頭、防遮蔽、大小適配所有螢幕) */
         .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.85); display: none; align-items: flex-end; justify-content: center; }
-        @media (min-width: 768px) { .modal-overlay { align-items: center; padding: 24px; } }
-        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 20px 20px 0 0; width: 100%; max-width: 1120px; padding: 20px 24px; max-height: 96vh; overflow-y: auto; }
-        @media (min-width: 768px) { .modal-box { border-radius: 18px; padding: 24px 28px; } }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 12px; }
+        @media (min-width: 768px) { .modal-overlay { align-items: center; padding: 20px; } }
+        .modal-box { 
+            background: #131b2e; 
+            border: 1px solid #2b3954; 
+            border-radius: 20px 20px 0 0; 
+            width: 100%; 
+            max-width: 1060px; 
+            padding: 0 20px 20px 20px; 
+            max-height: 94vh; 
+            overflow-y: auto; 
+            position: relative;
+        }
+        @media (min-width: 768px) { .modal-box { border-radius: 16px; padding: 0 24px 24px 24px; } }
+        
+        /* 關鍵：標題置頂鎖定，永遠不被滾動吃掉 */
+        .modal-header { 
+            position: sticky; 
+            top: 0; 
+            z-index: 20; 
+            background: #131b2e; 
+            border-bottom: 1px solid #1e293b; 
+            padding: 16px 0 12px 0; 
+            margin-bottom: 12px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
         .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; }
         .close-btn:hover { background: #334155; color: #fff; }
         
         .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 10px 14px; font-family: monospace; font-size: 13px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
         .hud-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         
-        .chart-box { height: 320px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px 8px 0 0; border: 1px solid #1e293b; border-bottom: none; overflow: hidden; }
-        @media (min-width: 768px) { .chart-box { height: 410px; } }
+        .chart-box { height: 280px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px 8px 0 0; border: 1px solid #1e293b; border-bottom: none; overflow: hidden; }
+        @media (min-width: 768px) { .chart-box { height: 340px; } }
         
-        .kd-chart-box { height: 115px; width: 100%; position: relative; background: #0b0f19; border-radius: 0 0 8px 8px; border: 1px solid #1e293b; border-top: 1px dashed #1e293b; overflow: hidden; }
-        @media (min-width: 768px) { .kd-chart-box { height: 135px; } }
+        .kd-chart-box { height: 95px; width: 100%; position: relative; background: #0b0f19; border-radius: 0 0 8px 8px; border: 1px solid #1e293b; border-top: 1px dashed #1e293b; overflow: hidden; }
+        @media (min-width: 768px) { .kd-chart-box { height: 110px; } }
         
         .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; text-align: center; font-family: monospace; }
         @media (min-width: 640px) { .factor-grid { grid-template-columns: repeat(6, 1fr); } }
         .factor-card { background: #182238; border: 1px solid #23304a; border-radius: 8px; padding: 10px 6px; }
         
-        .btn-link { display: block; width: 100%; padding: 14px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 15px; font-weight: 600; margin-top: 14px; transition: background 0.15s; }
+        .btn-link { display: block; width: 100%; padding: 12px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 12px; transition: background 0.15s; }
         .btn-link:hover { background: #1d4ed8; }
         
         .hidden { display: none !important; }
@@ -132,8 +162,12 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="container">
         <!-- 分頁切換 -->
         <div class="tabs">
-            <button onclick="switchTab('tw')" id="tab-tw" class="tab-btn active">🇹🇼 台股焦點 (20檔)</button>
-            <button onclick="switchTab('us')" id="tab-us" class="tab-btn">🇺🇸 美股焦點 (21檔)</button>
+            <button onclick="switchTab('tw')" id="tab-tw" class="tab-btn active">
+                <span class="market-pill tw-pill">台股</span> 核心焦點 (20檔)
+            </button>
+            <button onclick="switchTab('us')" id="tab-us" class="tab-btn">
+                <span class="market-pill us-pill">美股</span> 核心焦點 (21檔)
+            </button>
         </div>
 
         <!-- ================= 台股 ================= -->
@@ -173,18 +207,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
 
                 <div>
-                    <!-- 個人持股風控監控 -->
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="card-title">💼 我的台股庫存與風控 (8%停利停損 / 50MA)</span>
-                        </div>
-                        <div class="data-date">自動比對買進成本、波段最高價回檔與生命線支撐</div>
-                        __TW_PORTFOLIO__
-                    </div>
-
                     <!-- 標的綜合排序 -->
                     <div class="card">
-                        <div class="card-title" style="margin-bottom: 10px;">科技股評分排序 (點擊列開啟圖表)</div>
+                        <div class="card-title" style="margin-bottom: 10px;">科技股評分排序 (點擊列開啟專業圖表)</div>
                         <div class="table-wrap">
                             <table>
                                 <thead>
@@ -204,6 +229,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- 個人持股風控監控 (全寬卡片，一覽無遺) -->
+            <div class="card" style="margin-top: 4px;">
+                <div class="card-header">
+                    <span class="card-title">💼 我的台股庫存與風控 (8%停利停損 / 50MA生命線)</span>
+                </div>
+                <div class="data-date">自動比對買進成本、波段最高價回檔與生命線支撐</div>
+                __TW_PORTFOLIO__
             </div>
         </div>
 
@@ -244,18 +278,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
 
                 <div>
-                    <!-- 個人持股風控監控 -->
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="card-title">💼 我的美股庫存與風控 (8%停利停損 / 50MA)</span>
-                        </div>
-                        <div class="data-date">自動比對買進成本、波段最高價回檔與生命線支撐</div>
-                        __US_PORTFOLIO__
-                    </div>
-
                     <!-- 標的綜合排序 -->
                     <div class="card">
-                        <div class="card-title" style="margin-bottom: 10px;">科技股評分排序 (點擊列開啟圖表)</div>
+                        <div class="card-title" style="margin-bottom: 10px;">科技股評分排序 (點擊列開啟專業圖表)</div>
                         <div class="table-wrap">
                             <table>
                                 <thead>
@@ -276,6 +301,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
             </div>
+
+            <!-- 個人持股風控監控 (全寬卡片，一覽無遺) -->
+            <div class="card" style="margin-top: 4px;">
+                <div class="card-header">
+                    <span class="card-title">💼 我的美股庫存與風控 (8%停利停損 / 50MA生命線)</span>
+                </div>
+                <div class="data-date">自動比對買進成本、波段最高價回檔與生命線支撐</div>
+                __US_PORTFOLIO__
+            </div>
         </div>
 
         <div style="text-align: center; font-size: 13px; color: #475569; margin-top: 28px;">
@@ -286,12 +320,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <!-- ================= 專業看盤彈出視窗 (Modal) ================= -->
     <div id="stock-modal" class="modal-overlay" onclick="handleOverlayClick(event)">
         <div class="modal-box" onclick="event.stopPropagation()">
+            <!-- 標題欄 (Sticky 頂部鎖定，保證任何滾動下標題名稱不被吃掉) -->
             <div class="modal-header">
                 <div>
-                    <span id="modal-name" style="font-size: 20px; font-weight: bold; color: #f8fafc;">-</span>
-                    <span id="modal-symbol" style="font-size: 13px; color: #64748b; font-family: monospace; margin-left: 6px;">-</span>
-                    <div style="font-size: 14px; color: #94a3b8; margin-top: 4px;">
-                        最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace;">-</span>
+                    <div style="display: flex; align-items: baseline; gap: 8px;">
+                        <span id="modal-name" style="font-size: 21px; font-weight: bold; color: #f8fafc;">-</span>
+                        <span id="modal-symbol" style="font-size: 13px; color: #94a3b8; font-family: monospace;">-</span>
+                    </div>
+                    <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">
+                        最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace; font-size: 14px;">-</span>
                         <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
                 </div>
@@ -449,6 +486,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 extLink.href = 'https://www.tradingview.com/symbols/' + data.symbol + '/';
             }
 
+            // 預設 HUD 顯示最新最後一根 K 棒
             const lastCandle = data.candles[data.candles.length - 1];
             updateHUDByItem({
                 time: lastCandle.time,
@@ -465,11 +503,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             const modal = document.getElementById('stock-modal');
             modal.style.display = 'flex';
 
-            // 等待 DOM 展開完成後取得真實寬度渲染圖表
+            // 重置彈窗滾動條置頂，確保標題完美展現
+            const modalBox = modal.querySelector('.modal-box');
+            if (modalBox) modalBox.scrollTop = 0;
+
+            // 確保 DOM 渲染並取得確切寬度後繪製
             requestAnimationFrame(() => {
                 setTimeout(() => {
                     renderTradingViewCharts(data);
-                }, 40);
+                }, 30);
             });
         }
 
@@ -492,9 +534,10 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const containerWidth = mainContainer.clientWidth || 600;
             const isDesktop = window.innerWidth >= 768;
-            const mainHeight = isDesktop ? 410 : 320;
-            const kdHeight = isDesktop ? 135 : 115;
+            const mainHeight = isDesktop ? 340 : 280;
+            const kdHeight = isDesktop ? 110 : 95;
 
+            // 核心配置：鎖定邊界、消除任何無效留白
             const commonOptions = {
                 layout: {
                     background: { color: '#0b0f19' },
@@ -513,14 +556,14 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 rightPriceScale: {
                     borderColor: '#1e293b',
                     minimumWidth: 72,
-                    scaleMargins: { top: 0.1, bottom: 0.1 }
+                    scaleMargins: { top: 0.08, bottom: 0.08 }
                 },
                 timeScale: {
                     borderColor: '#1e293b',
                     timeVisible: false,
-                    rightOffset: 3,
-                    barSpacing: 8,
-                    minBarSpacing: 3
+                    rightOffset: 2,
+                    fixLeftEdge: true,
+                    fixRightEdge: true
                 }
             };
 
@@ -598,7 +641,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 isSyncingRange = false;
             });
 
-            // 4. 十字準星連動與 HUD
+            // 4. 十字準星連動與 HUD (滑鼠移開自動還原最新收盤價)
             const candleMap = {};
             data.candles.forEach(c => candleMap[c.time] = c);
             const sma20Map = {};
@@ -611,7 +654,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             data.kd_d.forEach(d => dMap[d.time] = d.value);
 
             const handleMove = param => {
-                if (param.time) {
+                if (param && param.time) {
                     const c = candleMap[param.time];
                     if (c) {
                         updateHUDByItem({
@@ -626,15 +669,29 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             d: dMap[param.time] || null
                         }, data.is_tw);
                     }
+                } else {
+                    const last = data.candles[data.candles.length - 1];
+                    updateHUDByItem({
+                        time: last.time,
+                        open: last.open,
+                        high: last.high,
+                        low: last.low,
+                        close: last.close,
+                        sma20: data.sma20.length ? data.sma20[data.sma20.length - 1].value : null,
+                        sma50: data.sma50.length ? data.sma50[data.sma50.length - 1].value : null,
+                        k: data.kd_k.length ? data.kd_k[data.kd_k.length - 1].value : null,
+                        d: data.kd_d.length ? data.kd_d[data.kd_d.length - 1].value : null
+                    }, data.is_tw);
                 }
             };
 
             mainChart.subscribeCrosshairMove(handleMove);
             kdChart.subscribeCrosshairMove(handleMove);
 
-            // 關鍵：呼叫 fitContent() 讓近半年 K 棒自適應鋪滿畫面，不留右側黑洞！
-            mainChart.timeScale().fitContent();
-            kdChart.timeScale().fitContent();
+            // 關鍵：將可視範圍強制鎖定在 [0, totalBars - 1]，100% 鋪滿圖表兩端，無任何懸空與留白！
+            const totalBars = data.candles.length;
+            const fullRange = { from: 0, to: totalBars - 1 };
+            mainChart.timeScale().setVisibleLogicalRange(fullRange);
         }
 
         window.addEventListener('resize', () => {
@@ -643,8 +700,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 if (w > 0) {
                     mainChart.applyOptions({ width: w });
                     kdChart.applyOptions({ width: w });
-                    mainChart.timeScale().fitContent();
-                    kdChart.timeScale().fitContent();
+                    mainChart.timeScale().setVisibleLogicalRange({ from: 0, to: currentStockData.candles.length - 1 });
                 }
             }
         });
@@ -653,9 +709,11 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         let isCheckingUpdate = false;
         async function checkCloudUpdates() {
             if (isCheckingUpdate) return;
+            // 本地 file:// 協定略過 fetch 避免瀏覽器安全性報錯
+            if (!window.location.protocol.startsWith('http')) return;
+            
             isCheckingUpdate = true;
             try {
-                // 發送微小帶時間戳請求抓取網頁，強制跳過本機快取
                 const url = window.location.href.split('?')[0] + '?t=' + Date.now();
                 const resp = await fetch(url, {
                     method: 'GET',
@@ -768,7 +826,6 @@ class WebDashboardGenerator:
         db = {}
         for ticker, raw_df in dataset.items():
             enriched = TechFeatureEngine.calculate_technical_features(raw_df)
-            # 取近 120 交易日 (半年足量歷史數據，使 fitContent 鋪滿時 K 棒粗細舒適約 8px)
             sub = enriched.tail(120)
             
             latest = enriched.iloc[-1]
