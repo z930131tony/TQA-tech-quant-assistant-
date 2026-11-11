@@ -1,5 +1,5 @@
 """
-專業看盤級自適應儀表板生成模組 (加大版面比例、自適應跨裝置、徹底修復雙圖左右滑動對齊與同步鎖)
+專業看盤級自適應儀表板生成模組 (徹底修復 K 棒與 KD 擠在左側、鎖定右側邊界防空隙、K棒自動鋪滿畫面)
 """
 import os
 import json
@@ -21,7 +21,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 50px; }
         
-        /* 全域容器加大比例 */
         .container { width: 100%; max-width: 1360px; margin: 0 auto; padding: 16px 20px; }
         
         header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
@@ -37,7 +36,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .tab-btn { flex: 1; max-width: 220px; padding: 14px; background: none; border: none; color: #64748b; font-size: 16px; font-weight: 500; cursor: pointer; text-align: center; }
         .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; font-weight: bold; }
         
-        /* 電腦端雙欄佈局 */
         .desktop-grid { display: flex; flex-direction: column; gap: 16px; }
         @media (min-width: 960px) {
             .desktop-grid { display: grid; grid-template-columns: 440px 1fr; gap: 24px; align-items: start; }
@@ -66,7 +64,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .grid-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
         .grid-val { font-size: 17px; font-weight: bold; }
         
-        /* 表格加大比例 */
         .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
         table { width: 100%; border-collapse: collapse; font-size: 14px; }
         th { text-align: left; padding: 12px 10px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; }
@@ -83,7 +80,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .desktop-only { display: none; }
         @media (min-width: 768px) { .desktop-only { display: table-cell; } }
         
-        /* 彈窗：大幅加大比例，手機佔比 96vh、電腦最大 980px 寬高畫面 */
+        /* 彈窗樣式 */
         .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.85); display: none; align-items: flex-end; justify-content: center; }
         @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 24px; } }
         .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 20px 20px 0 0; width: 100%; max-width: 980px; padding: 20px 24px; max-height: 96vh; overflow-y: auto; }
@@ -92,11 +89,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; }
         .close-btn:hover { background: #334155; color: #fff; }
         
-        /* 動態抬頭 HUD */
         .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 10px 14px; font-family: monospace; font-size: 13px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
         .hud-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
         
-        /* 圖表高度加大：手機 300px + 110px，電腦 360px + 130px */
         .chart-box { height: 280px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px 8px 0 0; border: 1px solid #1e293b; border-bottom: none; overflow: hidden; }
         @media (min-width: 640px) { .chart-box { height: 360px; } }
         
@@ -440,10 +435,10 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             const modal = document.getElementById('stock-modal');
             modal.style.display = 'flex';
 
-            // 等待 DOM 佈局後渲染，確保尺寸計算正確
+            // 等待 DOM 展開後正確渲染尺寸
             setTimeout(() => {
                 renderTradingViewCharts(data);
-            }, 30);
+            }, 50);
         }
 
         function closeStockModal() {
@@ -463,10 +458,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             mainContainer.innerHTML = '';
             kdContainer.innerHTML = '';
 
-            const containerWidth = mainContainer.clientWidth;
+            const containerWidth = mainContainer.clientWidth || 600;
 
-            // 核心修正 1：設定固定的 Y 軸價格刻度寬度 (minimumWidth: 72)
-            // 確保主圖與 KD 圖的 X 軸像素起點完全 100% 水平對齊，左右拖曳格式絕不跑掉！
+            // 核心設定：鎖定右側邊界 (fixRightEdge: true)，避免滑動或縮放時 K 棒被縮到左側空白處
             const commonOptions = {
                 layout: {
                     background: { color: '#0b0f19' },
@@ -484,12 +478,17 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 },
                 rightPriceScale: {
                     borderColor: '#1e293b',
-                    minimumWidth: 72
+                    minimumWidth: 72,
+                    scaleMargins: { top: 0.1, bottom: 0.1 }
                 },
                 timeScale: {
                     borderColor: '#1e293b',
                     timeVisible: false,
-                    rightOffset: 4
+                    rightOffset: 2,           // 緊貼右邊，只留 2 根間隔呼吸感
+                    barSpacing: 9,            // 舒適的 K 棒粗細
+                    minBarSpacing: 4,
+                    fixRightEdge: true,       // 關鍵：永遠鎖定最新 K 棒靠右對齊！絕不擠在左邊！
+                    lockVisibleTimeRangeOnResize: true
                 }
             };
 
@@ -497,7 +496,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             mainChart = LightweightCharts.createChart(mainContainer, {
                 ...commonOptions,
                 width: containerWidth,
-                height: mainContainer.clientHeight || 300
+                height: mainContainer.clientHeight || 340
             });
 
             candleSeries = mainChart.addCandlestickSeries({
@@ -526,11 +525,11 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             volumeSeries = mainChart.addHistogramSeries({
                 priceFormat: { type: 'volume' },
                 priceScaleId: '',
-                scaleMargins: { top: 0.8, bottom: 0 }
+                scaleMargins: { top: 0.82, bottom: 0 }
             });
             volumeSeries.setData(data.volume);
 
-            // 2. 建立 KD 指標子圖 (時間軸刻度隱藏，與主圖對齊)
+            // 2. 建立 KD 指標子圖
             kdChart = LightweightCharts.createChart(kdContainer, {
                 ...commonOptions,
                 width: containerWidth,
@@ -541,7 +540,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 }
             });
 
-            // 80/20 參考線
             const upperRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
             const lowerRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
             upperRef.setData(data.candles.map(c => ({ time: c.time, value: 80 })));
@@ -553,7 +551,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.8, crosshairMarkerVisible: false });
             dSeries.setData(data.kd_d);
 
-            // 3. 核心修正 2：使用 LogicalRange 雙向同步鎖，杜絕事件遞迴抖動與格式跑位
+            // 3. 雙向同步鎖
             mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
                 if (isSyncingRange || !range) return;
                 isSyncingRange = true;
@@ -568,7 +566,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 isSyncingRange = false;
             });
 
-            // 4. 十字準星連動與 HUD 即時更新
+            // 4. 十字準星連動與 HUD
             const candleMap = {};
             data.candles.forEach(c => candleMap[c.time] = c);
             const sma20Map = {};
@@ -602,12 +600,17 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             mainChart.subscribeCrosshairMove(handleMove);
             kdChart.subscribeCrosshairMove(handleMove);
 
-            // 初始填滿畫面
-            mainChart.timeScale().fitContent();
-            kdChart.timeScale().fitContent();
+            // 關鍵：將可視範圍自動定位在最新的 70 根 K 棒，填滿整個圖表寬度！
+            const totalBars = data.candles.length;
+            const visibleBars = Math.min(totalBars, Math.floor(containerWidth / 11));
+            const initialRange = {
+                from: Math.max(0, totalBars - visibleBars),
+                to: totalBars + 2
+            };
+            mainChart.timeScale().setVisibleLogicalRange(initialRange);
+            kdChart.timeScale().setVisibleLogicalRange(initialRange);
         }
 
-        // 螢幕旋轉或縮放時自動重繪圖表寬度
         window.addEventListener('resize', () => {
             if (mainChart && currentStockData) {
                 const w = document.getElementById('mainChartContainer').clientWidth;
@@ -696,7 +699,8 @@ class WebDashboardGenerator:
         db = {}
         for ticker, raw_df in dataset.items():
             enriched = TechFeatureEngine.calculate_technical_features(raw_df)
-            sub = enriched.tail(90)
+            # 取近 180 交易日 (約 9 個月足量歷史數據，確保畫面充沛，左右滾動流暢)
+            sub = enriched.tail(180)
             
             latest = enriched.iloc[-1]
             is_tw = (".TW" in ticker) or (".TWO" in ticker)
@@ -804,4 +808,4 @@ class WebDashboardGenerator:
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"大版面精準同步版網頁已生成：{output_path}")
+        print(f"右側鎖定鋪滿版網頁已生成：{output_path}")
