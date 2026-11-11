@@ -1,5 +1,5 @@
 """
-專業看盤級自適應儀表板生成模組 (整合 TradingView Lightweight Charts：支援完整 K 棒、成交量、20MA/50MA 均線與 KD 隨機指標)
+專業看盤級自適應儀表板生成模組 (加大版面比例、自適應跨裝置、徹底修復雙圖左右滑動對齊與同步鎖)
 """
 import os
 import json
@@ -15,59 +15,62 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>TQA 科技量化策略儀表板</title>
-    <!-- TradingView Lightweight Charts (45KB 專業金融 K 線圖表庫) -->
+    <!-- TradingView Lightweight Charts -->
     <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 50px; }
         
-        .container { width: 100%; max-width: 1280px; margin: 0 auto; padding: 12px 16px; }
+        /* 全域容器加大比例 */
+        .container { width: 100%; max-width: 1360px; margin: 0 auto; padding: 16px 20px; }
         
-        header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; }
+        header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
         .header-left { display: flex; align-items: center; gap: 12px; }
-        .logo-tag { background: #2563eb; color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-family: monospace; }
-        .title { font-size: 17px; font-weight: bold; color: #f8fafc; }
-        .subtitle { font-size: 12px; color: #94a3b8; }
+        .logo-tag { background: #2563eb; color: #fff; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px; font-family: monospace; }
+        .title { font-size: 19px; font-weight: bold; color: #f8fafc; }
+        .subtitle { font-size: 13px; color: #94a3b8; }
         .update-box { text-align: right; }
-        .update-label { font-size: 10px; color: #64748b; }
-        .update-time { font-size: 12px; font-family: monospace; color: #cbd5e1; }
+        .update-label { font-size: 11px; color: #64748b; }
+        .update-time { font-size: 13px; font-family: monospace; color: #cbd5e1; }
         
         .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 16px 0 20px 0; }
-        .tab-btn { flex: 1; max-width: 200px; padding: 12px; background: none; border: none; color: #64748b; font-size: 15px; font-weight: 500; cursor: pointer; text-align: center; }
+        .tab-btn { flex: 1; max-width: 220px; padding: 14px; background: none; border: none; color: #64748b; font-size: 16px; font-weight: 500; cursor: pointer; text-align: center; }
         .tab-btn.active { color: #38bdf8; border-bottom: 3px solid #38bdf8; font-weight: bold; }
         
+        /* 電腦端雙欄佈局 */
         .desktop-grid { display: flex; flex-direction: column; gap: 16px; }
         @media (min-width: 960px) {
-            .desktop-grid { display: grid; grid-template-columns: 400px 1fr; gap: 20px; align-items: start; }
+            .desktop-grid { display: grid; grid-template-columns: 440px 1fr; gap: 24px; align-items: start; }
         }
         
-        .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
-        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .card-title { font-size: 13px; font-weight: bold; color: #cbd5e1; }
-        .data-date { font-size: 12px; color: #64748b; margin-bottom: 12px; }
+        .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .card-title { font-size: 14px; font-weight: bold; color: #cbd5e1; }
+        .data-date { font-size: 12px; color: #64748b; margin-bottom: 14px; }
         
-        .badge { font-size: 11px; padding: 3px 10px; border-radius: 4px; font-weight: 600; font-family: monospace; }
+        .badge { font-size: 12px; padding: 4px 10px; border-radius: 5px; font-weight: 600; font-family: monospace; }
         .badge-bull { background: #064e3b; color: #34d399; border: 1px solid #059669; }
         .badge-bear { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
         
-        .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: #182238; border: 1px solid #243049; border-radius: 8px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s; }
+        .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: #182238; border: 1px solid #243049; border-radius: 10px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s; }
         .stock-item:hover { background: #1f2b45; border-color: #38bdf8; }
         .stock-item:active { transform: scale(0.99); }
-        .stock-left { display: flex; align-items: center; gap: 12px; }
-        .rank-num { width: 26px; height: 26px; background: #28354f; color: #cbd5e1; font-size: 12px; font-weight: bold; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
-        .stock-name { font-size: 14px; font-weight: bold; color: #f1f5f9; }
-        .stock-sub { font-size: 12px; color: #94a3b8; font-family: monospace; margin-top: 2px; }
+        .stock-left { display: flex; align-items: center; gap: 14px; }
+        .rank-num { width: 30px; height: 30px; background: #28354f; color: #cbd5e1; font-size: 13px; font-weight: bold; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
+        .stock-name { font-size: 15px; font-weight: bold; color: #f1f5f9; }
+        .stock-sub { font-size: 13px; color: #94a3b8; font-family: monospace; margin-top: 2px; }
         
         .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; text-align: center; font-family: monospace; }
         @media (min-width: 480px) and (max-width: 959px) { .grid-4 { grid-template-columns: repeat(4, 1fr); } }
-        .grid-item { background: #182238; padding: 10px; border-radius: 8px; border: 1px solid #1e293b; }
+        .grid-item { background: #182238; padding: 12px; border-radius: 8px; border: 1px solid #1e293b; }
         .grid-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
-        .grid-val { font-size: 16px; font-weight: bold; }
+        .grid-val { font-size: 17px; font-weight: bold; }
         
+        /* 表格加大比例 */
         .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; padding: 10px 8px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; }
-        td { padding: 12px 8px; border-bottom: 1px solid #182238; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { text-align: left; padding: 12px 10px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; }
+        td { padding: 14px 10px; border-bottom: 1px solid #182238; }
         tr.clickable { cursor: pointer; transition: background 0.1s; }
         tr.clickable:hover { background: #1a253c; }
         tr.clickable:active { background: #202e4a; }
@@ -80,32 +83,31 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .desktop-only { display: none; }
         @media (min-width: 768px) { .desktop-only { display: table-cell; } }
         
-        /* 彈窗樣式 */
-        .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.75); display: none; align-items: flex-end; justify-content: center; }
-        @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 20px; } }
-        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 16px 16px 0 0; width: 100%; max-width: 760px; padding: 20px; max-height: 92vh; overflow-y: auto; }
-        @media (min-width: 640px) { .modal-box { border-radius: 16px; } }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 10px; }
-        .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 32px; height: 32px; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; }
+        /* 彈窗：大幅加大比例，手機佔比 96vh、電腦最大 980px 寬高畫面 */
+        .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.85); display: none; align-items: flex-end; justify-content: center; }
+        @media (min-width: 640px) { .modal-overlay { align-items: center; padding: 24px; } }
+        .modal-box { background: #131b2e; border: 1px solid #2b3954; border-radius: 20px 20px 0 0; width: 100%; max-width: 980px; padding: 20px 24px; max-height: 96vh; overflow-y: auto; }
+        @media (min-width: 640px) { .modal-box { border-radius: 18px; } }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 12px; margin-bottom: 12px; }
+        .close-btn { background: #1e293b; border: none; color: #94a3b8; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; }
         .close-btn:hover { background: #334155; color: #fff; }
         
-        /* 頂部動態抬頭資訊 HUD (顯示詳細開高低收、量、KD、均線) */
-        .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 6px; padding: 8px 12px; font-family: monospace; font-size: 11px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+        /* 動態抬頭 HUD */
+        .chart-hud { background: #0b1220; border: 1px solid #243049; border-radius: 8px; padding: 10px 14px; font-family: monospace; font-size: 13px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
         .hud-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-        .hud-val { font-weight: bold; }
         
-        /* 專業看盤圖表容器 (支援 K 棒 + 均線 + 成交量) */
-        .chart-box { height: 260px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; overflow: hidden; }
-        @media (min-width: 640px) { .chart-box { height: 310px; } }
+        /* 圖表高度加大：手機 300px + 110px，電腦 360px + 130px */
+        .chart-box { height: 280px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px 8px 0 0; border: 1px solid #1e293b; border-bottom: none; overflow: hidden; }
+        @media (min-width: 640px) { .chart-box { height: 360px; } }
         
-        /* KD 指標子圖容器 */
-        .kd-chart-box { height: 100px; width: 100%; position: relative; background: #0b0f19; border-radius: 8px; border: 1px solid #1e293b; margin-top: 8px; overflow: hidden; }
+        .kd-chart-box { height: 110px; width: 100%; position: relative; background: #0b0f19; border-radius: 0 0 8px 8px; border: 1px solid #1e293b; border-top: 1px dashed #1e293b; overflow: hidden; }
+        @media (min-width: 640px) { .kd-chart-box { height: 130px; } }
         
-        .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; text-align: center; font-family: monospace; }
+        .factor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; text-align: center; font-family: monospace; }
         @media (min-width: 640px) { .factor-grid { grid-template-columns: repeat(6, 1fr); } }
-        .factor-card { background: #182238; border: 1px solid #23304a; border-radius: 8px; padding: 8px 4px; }
+        .factor-card { background: #182238; border: 1px solid #23304a; border-radius: 8px; padding: 10px 6px; }
         
-        .btn-link { display: block; width: 100%; padding: 12px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 14px; transition: background 0.15s; }
+        .btn-link { display: block; width: 100%; padding: 14px; background: #2563eb; color: #fff; text-decoration: none; text-align: center; border-radius: 8px; font-size: 15px; font-weight: 600; margin-top: 14px; transition: background 0.15s; }
         .btn-link:hover { background: #1d4ed8; }
         
         .hidden { display: none !important; }
@@ -252,7 +254,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
 
-        <div style="text-align: center; font-size: 12px; color: #475569; margin-top: 24px;">
+        <div style="text-align: center; font-size: 13px; color: #475569; margin-top: 28px;">
             數據來源: Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場
         </div>
     </div>
@@ -262,9 +264,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="modal-box" onclick="event.stopPropagation()">
             <div class="modal-header">
                 <div>
-                    <span id="modal-name" style="font-size: 18px; font-weight: bold; color: #f8fafc;">-</span>
-                    <span id="modal-symbol" style="font-size: 12px; color: #64748b; font-family: monospace; margin-left: 6px;">-</span>
-                    <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">
+                    <span id="modal-name" style="font-size: 20px; font-weight: bold; color: #f8fafc;">-</span>
+                    <span id="modal-symbol" style="font-size: 13px; color: #64748b; font-family: monospace; margin-left: 6px;">-</span>
+                    <div style="font-size: 14px; color: #94a3b8; margin-top: 4px;">
                         最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace;">-</span>
                         <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
@@ -272,57 +274,52 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 <button class="close-btn" onclick="closeStockModal()">✕</button>
             </div>
 
-            <!-- 即時 HUD：開高低收、均線、成交量與 KD -->
+            <!-- 即時 HUD -->
             <div id="chart-hud" class="chart-hud">
                 <div class="hud-row">
-                    <span id="hud-date" style="color: #cbd5e1;">📅 日期: --</span>
-                    <span id="hud-ohlc" style="color: #94a3b8;">開: -- 高: -- 低: -- 收: --</span>
+                    <span id="hud-date" style="color: #cbd5e1; font-weight: bold;">📅 日期: --</span>
+                    <span id="hud-ohlc" style="color: #cbd5e1;">開: -- 高: -- 低: -- 收: --</span>
                 </div>
-                <div class="hud-row" style="border-top: 1px dashed #1e293b; padding-top: 4px;">
+                <div class="hud-row" style="border-top: 1px dashed #1e293b; padding-top: 5px;">
                     <span id="hud-ma" style="color: #fbbf24;">20MA: -- | 50MA: --</span>
                     <span id="hud-kd" style="color: #38bdf8;">K: -- | D: --</span>
                 </div>
             </div>
 
-            <!-- K 線主圖 (Candlestick + 20MA/50MA 均線 + 成交量) -->
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#64748b; margin-bottom:4px;">
+            <!-- K 線主圖 + KD 子圖 (完全零間隙嚴密對齊) -->
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#64748b; margin-bottom:4px;">
                 <span>日 K 棒 + 20MA(紫) + 50MA生命線(黃)</span>
-                <span>手指拖曳滑動可十字看盤 / 雙指可縮放</span>
+                <span>手指按住拖曳可連動看盤 / 雙指可縮放</span>
             </div>
+            
             <div id="mainChartContainer" class="chart-box"></div>
-
-            <!-- KD (9, 3, 3) 隨機指標子圖 -->
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:#64748b; margin-top:10px; margin-bottom:4px;">
-                <span>KD (9, 3, 3) 指標 ➔ <span style="color:#38bdf8">K值(藍)</span> / <span style="color:#f97316">D值(橘)</span></span>
-                <span id="kd-status-tag" style="font-family:monospace; color:#cbd5e1;">-</span>
-            </div>
             <div id="kdChartContainer" class="kd-chart-box"></div>
 
             <!-- 六大因子數據卡片 -->
             <div class="factor-grid">
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">20日動能</div>
-                    <div id="modal-roc20" style="font-size: 13px; font-weight: bold;">-</div>
+                    <div style="font-size: 11px; color: #64748b;">20日動能</div>
+                    <div id="modal-roc20" style="font-size: 14px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">60日動能</div>
-                    <div id="modal-roc60" style="font-size: 13px; font-weight: bold;">-</div>
+                    <div style="font-size: 11px; color: #64748b;">60日動能</div>
+                    <div id="modal-roc60" style="font-size: 14px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">50MA乖離</div>
-                    <div id="modal-bias50" style="font-size: 13px; font-weight: bold;">-</div>
+                    <div style="font-size: 11px; color: #64748b;">50MA乖離</div>
+                    <div id="modal-bias50" style="font-size: 14px; font-weight: bold;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">14日 RSI</div>
-                    <div id="modal-rsi" style="font-size: 13px; font-weight: bold; color: #cbd5e1;">-</div>
+                    <div style="font-size: 11px; color: #64748b;">14日 RSI</div>
+                    <div id="modal-rsi" style="font-size: 14px; font-weight: bold; color: #cbd5e1;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">K (9)</div>
-                    <div id="modal-k9" style="font-size: 13px; font-weight: bold; color: #38bdf8;">-</div>
+                    <div style="font-size: 11px; color: #64748b;">K (9)</div>
+                    <div id="modal-k9" style="font-size: 14px; font-weight: bold; color: #38bdf8;">-</div>
                 </div>
                 <div class="factor-card">
-                    <div style="font-size: 10px; color: #64748b;">D (9)</div>
-                    <div id="modal-d9" style="font-size: 13px; font-weight: bold; color: #f97316;">-</div>
+                    <div style="font-size: 11px; color: #64748b;">D (9)</div>
+                    <div id="modal-d9" style="font-size: 14px; font-weight: bold; color: #f97316;">-</div>
                 </div>
             </div>
 
@@ -343,6 +340,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         let kSeries = null;
         let dSeries = null;
         let currentStockData = null;
+        let isSyncingRange = false;
 
         function switchTab(market) {
             const tabTw = document.getElementById('tab-tw');
@@ -418,14 +416,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('modal-k9').innerText = data.latest_k.toFixed(1);
             document.getElementById('modal-d9').innerText = data.latest_d.toFixed(1);
 
-            // KD 狀態判定標籤
-            const kdTag = document.getElementById('kd-status-tag');
-            if (data.latest_k > data.latest_d) {
-                kdTag.innerHTML = '<span style="color:#34d399">▲ K > D 多方掌握</span>';
-            } else {
-                kdTag.innerHTML = '<span style="color:#f87171">▼ K < D 空方承壓</span>';
-            }
-
             const extLink = document.getElementById('modal-ext-link');
             if (data.is_tw) {
                 const twClean = data.symbol.replace('.TW', '').replace('.TWO', '');
@@ -434,7 +424,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 extLink.href = 'https://www.tradingview.com/symbols/' + data.symbol + '/';
             }
 
-            // 預設更新 HUD 顯示最新數據
             const lastCandle = data.candles[data.candles.length - 1];
             updateHUDByItem({
                 time: lastCandle.time,
@@ -451,8 +440,10 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             const modal = document.getElementById('stock-modal');
             modal.style.display = 'flex';
 
-            // 渲染 TradingView 專業 K 棒與 KD 圖表
-            renderTradingViewCharts(data);
+            // 等待 DOM 佈局後渲染，確保尺寸計算正確
+            setTimeout(() => {
+                renderTradingViewCharts(data);
+            }, 30);
         }
 
         function closeStockModal() {
@@ -469,15 +460,18 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             const mainContainer = document.getElementById('mainChartContainer');
             const kdContainer = document.getElementById('kdChartContainer');
 
-            // 確保容器清空重建以獲得最佳尺寸適配
             mainContainer.innerHTML = '';
             kdContainer.innerHTML = '';
 
+            const containerWidth = mainContainer.clientWidth;
+
+            // 核心修正 1：設定固定的 Y 軸價格刻度寬度 (minimumWidth: 72)
+            // 確保主圖與 KD 圖的 X 軸像素起點完全 100% 水平對齊，左右拖曳格式絕不跑掉！
             const commonOptions = {
                 layout: {
                     background: { color: '#0b0f19' },
                     textColor: '#94a3b8',
-                    fontSize: 10
+                    fontSize: 11
                 },
                 grid: {
                     vertLines: { color: '#182238' },
@@ -485,25 +479,27 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 },
                 crosshair: {
                     mode: LightweightCharts.CrosshairMode.Normal,
-                    vertLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 },
-                    horzLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 }
+                    vertLine: { color: 'rgba(148, 163, 184, 0.45)', width: 1, style: 2 },
+                    horzLine: { color: 'rgba(148, 163, 184, 0.45)', width: 1, style: 2 }
                 },
                 rightPriceScale: {
-                    borderColor: '#1e293b'
+                    borderColor: '#1e293b',
+                    minimumWidth: 72
                 },
                 timeScale: {
                     borderColor: '#1e293b',
-                    timeVisible: false
+                    timeVisible: false,
+                    rightOffset: 4
                 }
             };
 
-            // 1. 建立主圖 (K 線 + 成交量 + 20MA/50MA)
+            // 1. 建立 K 線主圖
             mainChart = LightweightCharts.createChart(mainContainer, {
                 ...commonOptions,
-                height: mainContainer.clientHeight || 260
+                width: containerWidth,
+                height: mainContainer.clientHeight || 300
             });
 
-            // K 棒系列 (漲: 綠色 #34d399, 跌: 紅色 #f87171)
             candleSeries = mainChart.addCandlestickSeries({
                 upColor: '#34d399',
                 downColor: '#f87171',
@@ -513,7 +509,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             });
             candleSeries.setData(data.candles);
 
-            // 20MA 月線 (紫色)
             sma20Series = mainChart.addLineSeries({
                 color: '#c084fc',
                 lineWidth: 1.5,
@@ -521,15 +516,13 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             });
             sma20Series.setData(data.sma20);
 
-            // 50MA 季線/生命線 (黃色)
             sma50Series = mainChart.addLineSeries({
                 color: '#fbbf24',
-                lineWidth: 1.8,
+                lineWidth: 2,
                 crosshairMarkerVisible: false
             });
             sma50Series.setData(data.sma50);
 
-            // 成交量副圖
             volumeSeries = mainChart.addHistogramSeries({
                 priceFormat: { type: 'volume' },
                 priceScaleId: '',
@@ -537,27 +530,45 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             });
             volumeSeries.setData(data.volume);
 
-            // 2. 建立 KD (9, 3, 3) 子圖
+            // 2. 建立 KD 指標子圖 (時間軸刻度隱藏，與主圖對齊)
             kdChart = LightweightCharts.createChart(kdContainer, {
                 ...commonOptions,
-                height: kdContainer.clientHeight || 100
+                width: containerWidth,
+                height: kdContainer.clientHeight || 110,
+                timeScale: {
+                    ...commonOptions.timeScale,
+                    visible: false
+                }
             });
 
-            // 80/20 超買超賣參考線
-            const upperRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.2)', lineWidth: 1, lineStyle: 2 });
-            const lowerRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.2)', lineWidth: 1, lineStyle: 2 });
+            // 80/20 參考線
+            const upperRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+            const lowerRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
             upperRef.setData(data.candles.map(c => ({ time: c.time, value: 80 })));
             lowerRef.setData(data.candles.map(c => ({ time: c.time, value: 20 })));
 
-            // K 線 (藍色)
-            kSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1.6, crosshairMarkerVisible: false });
+            kSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1.8, crosshairMarkerVisible: false });
             kSeries.setData(data.kd_k);
 
-            // D 線 (橘色)
-            dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.6, crosshairMarkerVisible: false });
+            dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.8, crosshairMarkerVisible: false });
             dSeries.setData(data.kd_d);
 
-            // 3. 雙圖聯動 crosshair 移動監聽 (滑動時同步更新 HUD 抬頭)
+            // 3. 核心修正 2：使用 LogicalRange 雙向同步鎖，杜絕事件遞迴抖動與格式跑位
+            mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+                if (isSyncingRange || !range) return;
+                isSyncingRange = true;
+                kdChart.timeScale().setVisibleLogicalRange(range);
+                isSyncingRange = false;
+            });
+
+            kdChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+                if (isSyncingRange || !range) return;
+                isSyncingRange = true;
+                mainChart.timeScale().setVisibleLogicalRange(range);
+                isSyncingRange = false;
+            });
+
+            // 4. 十字準星連動與 HUD 即時更新
             const candleMap = {};
             data.candles.forEach(c => candleMap[c.time] = c);
             const sma20Map = {};
@@ -569,7 +580,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             const dMap = {};
             data.kd_d.forEach(d => dMap[d.time] = d.value);
 
-            mainChart.subscribeCrosshairMove(param => {
+            const handleMove = param => {
                 if (param.time) {
                     const c = candleMap[param.time];
                     if (c) {
@@ -586,20 +597,24 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         }, data.is_tw);
                     }
                 }
-            });
+            };
 
-            // 自適應調整可視範圍
+            mainChart.subscribeCrosshairMove(handleMove);
+            kdChart.subscribeCrosshairMove(handleMove);
+
+            // 初始填滿畫面
             mainChart.timeScale().fitContent();
             kdChart.timeScale().fitContent();
-
-            // 雙圖時間軸連動滾動縮放
-            mainChart.timeScale().subscribeVisibleTimeRangeChange(range => {
-                kdChart.timeScale().setVisibleRange(range);
-            });
-            kdChart.timeScale().subscribeVisibleTimeRangeChange(range => {
-                mainChart.timeScale().setVisibleRange(range);
-            });
         }
+
+        // 螢幕旋轉或縮放時自動重繪圖表寬度
+        window.addEventListener('resize', () => {
+            if (mainChart && currentStockData) {
+                const w = document.getElementById('mainChartContainer').clientWidth;
+                mainChart.applyOptions({ width: w });
+                kdChart.applyOptions({ width: w });
+            }
+        });
     </script>
 </body>
 </html>
@@ -660,7 +675,7 @@ class WebDashboardGenerator:
             <tr onclick="openStockModal('{ticker}')" class="clickable">
                 <td class="font-mono" style="color: #64748b; font-weight: bold;">#{idx+1}</td>
                 <td>
-                    <div style="font-weight: bold; color: #f1f5f9; font-size: 14px;">{name}</div>
+                    <div style="font-weight: bold; color: #f1f5f9; font-size: 15px;">{name}</div>
                     <div class="font-mono" style="font-size: 11px; color: #64748b;">{ticker}</div>
                 </td>
                 <td class="text-right font-mono" style="font-weight: 600;">{currency}{price:,.2f}</td>
@@ -681,7 +696,7 @@ class WebDashboardGenerator:
         db = {}
         for ticker, raw_df in dataset.items():
             enriched = TechFeatureEngine.calculate_technical_features(raw_df)
-            sub = enriched.tail(90)  # 取近 90 交易日繪製完整 K 線與 KD
+            sub = enriched.tail(90)
             
             latest = enriched.iloc[-1]
             is_tw = (".TW" in ticker) or (".TWO" in ticker)
@@ -789,4 +804,4 @@ class WebDashboardGenerator:
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
-        print(f"K線與KD看盤版網頁已成功生成：{output_path}")
+        print(f"大版面精準同步版網頁已生成：{output_path}")
