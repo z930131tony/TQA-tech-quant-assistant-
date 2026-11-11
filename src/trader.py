@@ -119,7 +119,14 @@ class AutoTrader:
         # 2B. 美股市場
         us_top3 = us_rank.head(3)
         us_bull_count = us_top3["above_50sma"].sum()
-        if us_bull_count >= 2:
+        qqq_df = self.dataset.get("QQQ")
+        qqq_bull = True
+        if qqq_df is not None and not qqq_df.empty:
+            q_close = float(qqq_df["close"].iloc[-1])
+            q_sma200 = float(qqq_df["close"].rolling(200).mean().iloc[-1])
+            qqq_bull = (q_close >= q_sma200)
+
+        if us_bull_count >= 2 and qqq_bull:
             for _, row in us_top3.iterrows():
                 t = row["ticker"]
                 if t not in current_tickers and row["above_50sma"]:
@@ -133,6 +140,8 @@ class AutoTrader:
                     })
                     current_tickers.add(t)
                     trade_logs.append(f"🟢 【模擬買進委託】{t} (美股)\n   └ 股數: {shares} 股\n   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n   └ 依據: 動能天梯入選 (評分: {row['score']:.1f})")
+        else:
+            trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
 
         # 儲存回 portfolio.json
         PortfolioTracker.save_portfolio(kept_positions)

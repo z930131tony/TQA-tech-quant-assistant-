@@ -17,6 +17,12 @@
       "shares": 2,
       "cost_price": 393.3,
       "entry_date": "2026-11-11"
+    },
+    {
+      "ticker": "AMD",
+      "shares": 1,
+      "cost_price": 560.8,
+      "entry_date": "2026-11-12"
     }
   ]
 }
