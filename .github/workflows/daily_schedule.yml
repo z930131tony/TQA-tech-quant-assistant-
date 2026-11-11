@@ -37,6 +37,13 @@ jobs:
         run: |
           python run_daily.py
 
+      - name: 提交更新後的 index.html 至 main 分支
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Actions"
+          git add index.html
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore(auto): 自動更新股市數據與儀表板 [skip ci]" && git push origin main)
+
       - name: 自動部署到 GitHub Pages (供手機隨時瀏覽)
         uses: peaceiris/actions-gh-pages@v4
         with:

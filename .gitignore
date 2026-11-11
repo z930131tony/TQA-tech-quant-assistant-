@@ -17,3 +17,6 @@ data_cache/
 .env
 *.pem
 *.key
+*.pfx
+*.p12
+shioaji.log
