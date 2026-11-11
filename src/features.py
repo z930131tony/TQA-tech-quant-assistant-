@@ -1,16 +1,16 @@
 """
-科技股特徵工程與量化評分引擎 (基於 NumPy 與 Pandas 高速計算)
+技術特徵計算與排序評分引擎
 """
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 from src.config import config, TECH_UNIVERSE_TW
 
 class TechFeatureEngine:
     @staticmethod
     def calculate_technical_features(df: pd.DataFrame) -> pd.DataFrame:
         """
-        為單一標的計算動能、均線趨勢、波動度與破新高指標
+        計算技術指標：動能 (ROC)、均線濾網 (SMA)、突破線與波動度 (ATR)
         """
         data = df.copy()
         close = data["close"]
@@ -25,34 +25,33 @@ class TechFeatureEngine:
         # 2. 趨勢濾網均線 (SMA)
         data["sma_50"] = close.rolling(window=config.trend_filter_sma).mean()
         data["sma_200"] = close.rolling(window=config.long_term_sma).mean()
-        data["above_50sma"] = close > data["sma_50"]
-        data["above_200sma"] = close > data["sma_200"]
+        data["above_50sma"] = close >= data["sma_50"]
+        data["above_200sma"] = close >= data["sma_200"]
         
         # 3. 20日最高價突破指標 (Donchian Channel)
         data["high_20d"] = high.rolling(window=20).max()
         data["is_new_high_20d"] = close >= data["high_20d"].shift(1)
         
-        # 4. 波動度與 ATR (真實波動區間)
+        # 4. ATR (真實波動區間)
         tr1 = high - low
         tr2 = (high - close.shift(1)).abs()
         tr3 = (low - close.shift(1)).abs()
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         data["atr_20"] = tr.rolling(window=20).mean()
-        data["atr_pct"] = (data["atr_20"] / close) * 100
+        data["atr_pct"] = (data["atr_20"] / close.replace(0, np.nan)) * 100
         
         # 5. 14 日 RSI
         delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        gain = delta.clip(lower=0).rolling(window=14).mean()
+        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         rs = gain / (loss + 1e-9)
         data["rsi_14"] = 100 - (100 / (1 + rs))
         
-        # 6. 綜合動能打分 (Tech Momentum Score)
-        # 加權公式：40% 的 20日爆發 + 40% 的 60日季線波段 + 20% 的半年趨勢
+        # 6. 綜合動能評分 (權重: 20日 40%, 60日 40%, 120日 20%)
         data["momentum_score"] = (
-            data["roc_20"] * 0.4 +
-            data["roc_60"] * 0.4 +
-            data["roc_120"] * 0.2
+            data["roc_20"].fillna(0) * 0.4 +
+            data["roc_60"].fillna(0) * 0.4 +
+            data["roc_120"].fillna(0) * 0.2
         )
         
         return data
@@ -60,7 +59,7 @@ class TechFeatureEngine:
     @classmethod
     def evaluate_latest_ranking(cls, dataset: Dict[str, pd.DataFrame]) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        評估台股與美股當前的最新排名與操作建議
+        評估台美股最新動能排名與趨勢狀態
         """
         tw_records = []
         us_records = []
@@ -68,10 +67,12 @@ class TechFeatureEngine:
         for ticker, df in dataset.items():
             enriched_df = cls.calculate_technical_features(df)
             latest = enriched_df.iloc[-1]
+            latest_date_str = enriched_df.index[-1].strftime("%Y-%m-%d")
             
             record = {
                 "ticker": ticker,
                 "name": TECH_UNIVERSE_TW.get(ticker, ticker),
+                "data_date": latest_date_str,
                 "price": round(float(latest["close"]), 2),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
@@ -87,7 +88,6 @@ class TechFeatureEngine:
             else:
                 us_records.append(record)
                 
-        # 轉成 DataFrame 並依據綜合動量評分 (score) 降序排序
         tw_rank_df = pd.DataFrame(tw_records).sort_values(by="score", ascending=False).reset_index(drop=True)
         us_rank_df = pd.DataFrame(us_records).sort_values(by="score", ascending=False).reset_index(drop=True)
         

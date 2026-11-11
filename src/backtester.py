@@ -78,7 +78,7 @@ class TechBacktester:
                     # 檢查追蹤停損 (Trailing Stop)
                     drawdown_from_peak = (peak_prices[ticker] - curr_price) / peak_prices[ticker]
                     if drawdown_from_peak >= self.trailing_stop_pct:
-                        liquidate_due_to_stop.append((ticker, curr_price, "追蹤停損觸發 (-8%)"))
+                        liquidate_due_to_stop.append((ticker, curr_price, "停損平倉 (回檔達8%)"))
                     else:
                         current_portfolio_value += shares * curr_price
                 else:

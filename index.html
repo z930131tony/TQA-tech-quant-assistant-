@@ -3,190 +3,148 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>⚡ TQA 科技量化投資儀表板</title>
-    <!-- Tailwind CSS CDN -->
+    <title>TQA 科技量化策略儀表板</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        darkBg: '#0f172a',
-                        cardBg: '#1e293b',
-                        cardBorder: '#334155',
-                        bullGreen: '#10b981',
-                        bearRed: '#ef4444',
-                        accentBlue: '#3b82f6',
-                        goldYellow: '#f59e0b'
-                    }
-                }
-            }
-        }
-    </script>
     <style>
-        body { background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-        .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
-        .tab-btn.active { border-bottom: 3px solid #3b82f6; color: #60a5fa; font-weight: bold; }
-        /* 隱藏滾動條但保持滾動 */
+        body { background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .card { background: #151d2f; border: 1px solid #232f48; }
+        .tab-btn.active { border-bottom: 2px solid #3b82f6; color: #60a5fa; font-weight: 600; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     </style>
 </head>
-<body class="text-slate-100 min-h-screen pb-12">
+<body class="text-slate-100 min-h-screen pb-10">
 
-    <!-- 頂部導覽列 (適合手機單手滑動) -->
-    <header class="sticky top-0 z-50 glass-card border-b border-slate-800 px-4 py-3 flex items-center justify-between">
-        <div class="flex items-center space-x-2">
-            <span class="text-2xl">⚡</span>
-            <div>
-                <h1 class="font-extrabold text-base tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">TQA 科技量化助手</h1>
-                <p class="text-[10px] text-slate-400">大戶投專屬 • 台美純科技輪動</p>
-            </div>
+    <header class="sticky top-0 z-50 card border-b px-4 py-3 flex items-center justify-between">
+        <div>
+            <h1 class="font-bold text-base text-slate-100">TQA 科技量化策略</h1>
+            <p class="text-[11px] text-slate-400">大戶投現貨 / 複委託波段輪動</p>
         </div>
         <div class="text-right">
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
-                <span class="w-1.5 h-1.5 mr-1 bg-emerald-400 rounded-full animate-pulse"></span> 雲端在線
-            </span>
-            <div class="text-[10px] text-slate-400 mt-0.5" id="update-time">更新: 2026-11-11 17:57:46</div>
+            <span class="text-[10px] text-slate-400">更新時間</span>
+            <div class="text-[11px] font-mono text-slate-300">2026-11-11 18:02</div>
         </div>
     </header>
 
-    <main class="max-w-4xl mx-auto px-4 mt-4 space-y-5">
+    <main class="max-w-3xl mx-auto px-4 mt-4 space-y-4">
 
-        <!-- 市場切換分頁 (Tab) -->
-        <div class="flex border-b border-slate-800 text-sm font-medium">
-            <button onclick="switchTab('tw')" id="tab-tw" class="tab-btn active flex-1 py-3 text-center transition-colors">
-                🇹🇼 台股科技天團
+        <!-- 分頁切換 -->
+        <div class="flex border-b border-slate-800 text-sm">
+            <button onclick="switchTab('tw')" id="tab-tw" class="tab-btn active flex-1 py-2.5 text-center transition-colors">
+                台股焦點
             </button>
-            <button onclick="switchTab('us')" id="tab-us" class="tab-btn flex-1 py-3 text-center text-slate-400 hover:text-slate-200 transition-colors">
-                🇺🇸 美股科技天團
+            <button onclick="switchTab('us')" id="tab-us" class="tab-btn flex-1 py-2.5 text-center text-slate-400 hover:text-slate-200 transition-colors">
+                美股焦點
             </button>
         </div>
 
-        <!-- ================= 台股內容區塊 ================= -->
-        <div id="content-tw" class="space-y-5">
-            <!-- 推薦操作卡片 -->
-            <div class="glass-card rounded-2xl p-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
-                        🎯 大戶投晨間建議 (08:45 推播)
-                    </span>
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">🛡️ 防禦避險 (觀望現金)</span>
+        <!-- ================= 台股 ================= -->
+        <div id="content-tw" class="space-y-4">
+            <div class="card rounded-xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-semibold text-slate-300">大戶投操作指引</span>
+                    <span class="text-xs px-2 py-0.5 rounded font-mono bg-slate-800 text-slate-300 border border-slate-700">防禦觀望</span>
                 </div>
+                <div class="text-[11px] text-slate-400 mb-3">數據基準日：2026-11-11 收盤</div>
                 <div class="space-y-2">
                     
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div class="flex items-center space-x-3">
-                    <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold text-xs">
-                        #1
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-6 h-6 rounded bg-slate-700 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        1
                     </span>
                     <div>
-                        <div class="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                            緯創
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">(3231.TW)</span>
+                        <div class="font-bold text-slate-200 text-xs">
+                            緯創 <span class="font-mono text-slate-400 font-normal">(3231.TW)</span>
                         </div>
-                        <div class="text-[11px] text-slate-400">
-                            最新價: <span class="font-mono text-slate-200">NT$174.50</span> • 評分: <span class="text-blue-400 font-mono">+0.1</span>
+                        <div class="text-[11px] text-slate-400 font-mono">
+                            收盤 NT$174.50 | 評分 +0.1
                         </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <span class="inline-block px-2.5 py-1 text-xs rounded-lg font-medium border bg-slate-700/50 text-slate-400 border-slate-600/30">
-                        ⚪ 防禦觀望
+                <div>
+                    <span class="px-2 py-0.5 text-xs rounded font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                        觀望 / 現金
                     </span>
-                    <div class="text-[10px] text-slate-500 mt-1">盤中零股或整股</div>
                 </div>
             </div>
             
 
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div class="flex items-center space-x-3">
-                    <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold text-xs">
-                        #2
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-6 h-6 rounded bg-slate-700 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        2
                     </span>
                     <div>
-                        <div class="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                            台積電
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">(2330.TW)</span>
+                        <div class="font-bold text-slate-200 text-xs">
+                            台積電 <span class="font-mono text-slate-400 font-normal">(2330.TW)</span>
                         </div>
-                        <div class="text-[11px] text-slate-400">
-                            最新價: <span class="font-mono text-slate-200">NT$2,395.00</span> • 評分: <span class="text-blue-400 font-mono">-0.2</span>
+                        <div class="text-[11px] text-slate-400 font-mono">
+                            收盤 NT$2,395.00 | 評分 -0.2
                         </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <span class="inline-block px-2.5 py-1 text-xs rounded-lg font-medium border bg-slate-700/50 text-slate-400 border-slate-600/30">
-                        ⚪ 防禦觀望
+                <div>
+                    <span class="px-2 py-0.5 text-xs rounded font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                        觀望 / 現金
                     </span>
-                    <div class="text-[10px] text-slate-500 mt-1">盤中零股或整股</div>
                 </div>
             </div>
             
 
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div class="flex items-center space-x-3">
-                    <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold text-xs">
-                        #3
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-6 h-6 rounded bg-slate-700 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        3
                     </span>
                     <div>
-                        <div class="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                            聯發科
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">(2454.TW)</span>
+                        <div class="font-bold text-slate-200 text-xs">
+                            聯發科 <span class="font-mono text-slate-400 font-normal">(2454.TW)</span>
                         </div>
-                        <div class="text-[11px] text-slate-400">
-                            最新價: <span class="font-mono text-slate-200">NT$3,990.00</span> • 評分: <span class="text-blue-400 font-mono">-1.5</span>
+                        <div class="text-[11px] text-slate-400 font-mono">
+                            收盤 NT$3,990.00 | 評分 -1.5
                         </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <span class="inline-block px-2.5 py-1 text-xs rounded-lg font-medium border bg-slate-700/50 text-slate-400 border-slate-600/30">
-                        ⚪ 防禦觀望
+                <div>
+                    <span class="px-2 py-0.5 text-xs rounded font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                        觀望 / 現金
                     </span>
-                    <div class="text-[10px] text-slate-500 mt-1">盤中零股或整股</div>
                 </div>
             </div>
             
                 </div>
             </div>
 
-            <!-- 台股回測績效儀表板 -->
-            <div class="glass-card rounded-2xl p-4">
-                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                    📊 策略歷史成績單 (vs 0052 富邦科技)
-                </h3>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">總報酬率</div>
-                        <div class="text-lg font-bold text-emerald-400 font-mono">+207.49%</div>
+            <div class="card rounded-xl p-4">
+                <h3 class="text-xs font-semibold text-slate-400 mb-2.5">歷史回測績效 (2024 - 2026)</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center font-mono">
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">總報酬率</div>
+                        <div class="text-base font-bold text-emerald-400">+158.49%</div>
                     </div>
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">年化報酬 (CAGR)</div>
-                        <div class="text-lg font-bold text-emerald-400 font-mono">+52.87%</div>
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">年化報酬 (CAGR)</div>
+                        <div class="text-base font-bold text-emerald-400">+43.16%</div>
                     </div>
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">超額報酬 (Alpha)</div>
-                        <div class="text-lg font-bold text-amber-400 font-mono">+264.37%</div>
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">同期基準 (0052)</div>
+                        <div class="text-base font-bold text-slate-300">-56.88%</div>
                     </div>
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">最大回撤 (MDD)</div>
-                        <div class="text-lg font-bold text-rose-400 font-mono">-71.67%</div>
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">最大回撤 (MDD)</div>
+                        <div class="text-base font-bold text-rose-400">-71.67%</div>
                     </div>
                 </div>
             </div>
 
-            <!-- 台股動態評分天梯 (表格，手機橫滑友好) -->
-            <div class="glass-card rounded-2xl p-4 overflow-hidden">
-                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                    🏆 台股科技動能天梯排行
-                </h3>
+            <div class="card rounded-xl p-4 overflow-hidden">
+                <h3 class="text-xs font-semibold text-slate-400 mb-2.5">標的評分排序</h3>
                 <div class="overflow-x-auto no-scrollbar">
                     <table class="w-full text-left text-xs">
                         <thead>
-                            <tr class="text-slate-400 border-b border-slate-800 pb-2">
-                                <th class="py-2">排名</th>
+                            <tr class="text-slate-400 border-b border-slate-800">
+                                <th class="py-1.5">排名</th>
                                 <th>標的</th>
                                 <th class="text-right">最新價</th>
                                 <th class="text-right">20日動能</th>
@@ -194,109 +152,109 @@
                                 <th class="text-center">狀態</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-800/60">
+                        <tbody class="divide-y divide-slate-800/50">
                             
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#1</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#1</td>
                 <td class="font-medium text-slate-200">
                     <div>緯創</div>
                     <div class="text-[10px] text-slate-500 font-mono">3231.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$174.50</td>
+                <td class="text-right font-mono text-slate-200">NT$174.50</td>
                 <td class="text-right font-mono text-rose-400">-6.68%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">+0.1</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">+0.1</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#2</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#2</td>
                 <td class="font-medium text-slate-200">
                     <div>台積電</div>
                     <div class="text-[10px] text-slate-500 font-mono">2330.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$2,395.00</td>
+                <td class="text-right font-mono text-slate-200">NT$2,395.00</td>
                 <td class="text-right font-mono text-rose-400">-3.82%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-0.2</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-0.2</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#3</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#3</td>
                 <td class="font-medium text-slate-200">
                     <div>聯發科</div>
                     <div class="text-[10px] text-slate-500 font-mono">2454.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$3,990.00</td>
+                <td class="text-right font-mono text-slate-200">NT$3,990.00</td>
                 <td class="text-right font-mono text-rose-400">-11.82%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-1.5</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-1.5</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#4</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#4</td>
                 <td class="font-medium text-slate-200">
                     <div>鴻海</div>
                     <div class="text-[10px] text-slate-500 font-mono">2317.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$242.00</td>
+                <td class="text-right font-mono text-slate-200">NT$242.00</td>
                 <td class="text-right font-mono text-emerald-400">+0.83%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-2.4</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-2.4</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#5</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#5</td>
                 <td class="font-medium text-slate-200">
                     <div>富邦科技</div>
                     <div class="text-[10px] text-slate-500 font-mono">0052.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$59.85</td>
+                <td class="text-right font-mono text-slate-200">NT$59.85</td>
                 <td class="text-right font-mono text-rose-400">-8.49%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-3.2</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-3.2</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#6</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#6</td>
                 <td class="font-medium text-slate-200">
                     <div>廣達</div>
                     <div class="text-[10px] text-slate-500 font-mono">2382.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$298.00</td>
+                <td class="text-right font-mono text-slate-200">NT$298.00</td>
                 <td class="text-right font-mono text-rose-400">-7.74%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-5.0</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-5.0</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#7</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#7</td>
                 <td class="font-medium text-slate-200">
                     <div>國泰台灣5G+</div>
                     <div class="text-[10px] text-slate-500 font-mono">00881.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$45.50</td>
+                <td class="text-right font-mono text-slate-200">NT$45.50</td>
                 <td class="text-right font-mono text-rose-400">-12.50%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-8.2</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-8.2</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#8</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#8</td>
                 <td class="font-medium text-slate-200">
                     <div>台達電</div>
                     <div class="text-[10px] text-slate-500 font-mono">2308.TW</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">NT$1,295.00</td>
+                <td class="text-right font-mono text-slate-200">NT$1,295.00</td>
                 <td class="text-right font-mono text-rose-400">-27.04%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-29.7</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-29.7</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
                         </tbody>
@@ -305,127 +263,113 @@
             </div>
         </div>
 
-        <!-- ================= 美股內容區塊 ================= -->
-        <div id="content-us" class="space-y-5 hidden">
-            <!-- 推薦操作卡片 -->
-            <div class="glass-card rounded-2xl p-4 border border-blue-500/20 shadow-lg shadow-blue-500/5">
-                <div class="flex items-center justify-between mb-3">
-                    <span class="text-xs font-semibold uppercase tracking-wider text-blue-400 flex items-center gap-1">
-                        🎯 大戶投複委託建議 (21:10 推播)
-                    </span>
-                    <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">🟢 積極進攻</span>
+        <!-- ================= 美股 ================= -->
+        <div id="content-us" class="space-y-4 hidden">
+            <div class="card rounded-xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-semibold text-slate-300">複委託操作指引</span>
+                    <span class="text-xs px-2 py-0.5 rounded font-mono bg-emerald-950 text-emerald-400 border border-emerald-800">多頭進攻</span>
                 </div>
+                <div class="text-[11px] text-slate-400 mb-3">數據基準日：2026-11-10 收盤</div>
                 <div class="space-y-2">
                     
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div class="flex items-center space-x-3">
-                    <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold text-xs">
-                        #1
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-6 h-6 rounded bg-slate-700 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        1
                     </span>
                     <div>
-                        <div class="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                            AAPL
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">(AAPL)</span>
+                        <div class="font-bold text-slate-200 text-xs">
+                            AAPL <span class="font-mono text-slate-400 font-normal">(AAPL)</span>
                         </div>
-                        <div class="text-[11px] text-slate-400">
-                            最新價: <span class="font-mono text-slate-200">$348.51</span> • 評分: <span class="text-blue-400 font-mono">+9.6</span>
+                        <div class="text-[11px] text-slate-400 font-mono">
+                            收盤 $348.51 | 評分 +9.6
                         </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <span class="inline-block px-2.5 py-1 text-xs rounded-lg font-medium border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-                        🟢 建議買入/持有
+                <div>
+                    <span class="px-2 py-0.5 text-xs rounded font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        買進 / 續抱
                     </span>
-                    <div class="text-[10px] text-slate-500 mt-1">大戶投複委託碎股</div>
                 </div>
             </div>
             
 
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div class="flex items-center space-x-3">
-                    <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold text-xs">
-                        #2
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-6 h-6 rounded bg-slate-700 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        2
                     </span>
                     <div>
-                        <div class="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                            MSFT
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">(MSFT)</span>
+                        <div class="font-bold text-slate-200 text-xs">
+                            MSFT <span class="font-mono text-slate-400 font-normal">(MSFT)</span>
                         </div>
-                        <div class="text-[11px] text-slate-400">
-                            最新價: <span class="font-mono text-slate-200">$533.16</span> • 評分: <span class="text-blue-400 font-mono">+9.2</span>
+                        <div class="text-[11px] text-slate-400 font-mono">
+                            收盤 $533.16 | 評分 +9.2
                         </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <span class="inline-block px-2.5 py-1 text-xs rounded-lg font-medium border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-                        🟢 建議買入/持有
+                <div>
+                    <span class="px-2 py-0.5 text-xs rounded font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        買進 / 續抱
                     </span>
-                    <div class="text-[10px] text-slate-500 mt-1">大戶投複委託碎股</div>
                 </div>
             </div>
             
 
-            <div class="flex items-center justify-between p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                <div class="flex items-center space-x-3">
-                    <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold text-xs">
-                        #3
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/50">
+                <div class="flex items-center space-x-2.5">
+                    <span class="w-6 h-6 rounded bg-slate-700 text-slate-300 font-mono text-xs flex items-center justify-center font-bold">
+                        3
                     </span>
                     <div>
-                        <div class="font-bold text-slate-100 text-sm flex items-center gap-1.5">
-                            AMZN
-                            <span class="text-[10px] text-slate-400 font-mono font-normal">(AMZN)</span>
+                        <div class="font-bold text-slate-200 text-xs">
+                            AMZN <span class="font-mono text-slate-400 font-normal">(AMZN)</span>
                         </div>
-                        <div class="text-[11px] text-slate-400">
-                            最新價: <span class="font-mono text-slate-200">$270.87</span> • 評分: <span class="text-blue-400 font-mono">+3.8</span>
+                        <div class="text-[11px] text-slate-400 font-mono">
+                            收盤 $270.87 | 評分 +3.8
                         </div>
                     </div>
                 </div>
-                <div class="text-right">
-                    <span class="inline-block px-2.5 py-1 text-xs rounded-lg font-medium border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
-                        🟢 建議買入/持有
+                <div>
+                    <span class="px-2 py-0.5 text-xs rounded font-medium bg-emerald-950 text-emerald-400 border border-emerald-800">
+                        買進 / 續抱
                     </span>
-                    <div class="text-[10px] text-slate-500 mt-1">大戶投複委託碎股</div>
                 </div>
             </div>
             
                 </div>
             </div>
 
-            <!-- 美股回測績效儀表板 -->
-            <div class="glass-card rounded-2xl p-4">
-                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-                    📊 策略歷史成績單 (vs QQQ 那斯達克100)
-                </h3>
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">總報酬率</div>
-                        <div class="text-lg font-bold text-emerald-400 font-mono">+40.09%</div>
+            <div class="card rounded-xl p-4">
+                <h3 class="text-xs font-semibold text-slate-400 mb-2.5">歷史回測績效 (2024 - 2026)</h3>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center font-mono">
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">總報酬率</div>
+                        <div class="text-base font-bold text-emerald-400">+39.44%</div>
                     </div>
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">年化報酬 (CAGR)</div>
-                        <div class="text-lg font-bold text-emerald-400 font-mono">+13.08%</div>
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">年化報酬 (CAGR)</div>
+                        <div class="text-base font-bold text-emerald-400">+12.89%</div>
                     </div>
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">夏普比率 (Sharpe)</div>
-                        <div class="text-lg font-bold text-amber-400 font-mono">0.52</div>
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">同期基準 (QQQ)</div>
+                        <div class="text-base font-bold text-slate-300">+56.63%</div>
                     </div>
-                    <div class="bg-slate-800/60 rounded-xl p-2.5 border border-slate-700/50">
-                        <div class="text-[11px] text-slate-400">最大回撤 (MDD)</div>
-                        <div class="text-lg font-bold text-rose-400 font-mono">-26.56%</div>
+                    <div class="bg-slate-800/50 rounded-lg p-2">
+                        <div class="text-[10px] text-slate-400">最大回撤 (MDD)</div>
+                        <div class="text-base font-bold text-rose-400">-26.56%</div>
                     </div>
                 </div>
             </div>
 
-            <!-- 美股動態評分天梯 -->
-            <div class="glass-card rounded-2xl p-4 overflow-hidden">
-                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-                    🏆 美股科技動能天梯排行
-                </h3>
+            <div class="card rounded-xl p-4 overflow-hidden">
+                <h3 class="text-xs font-semibold text-slate-400 mb-2.5">標的評分排序</h3>
                 <div class="overflow-x-auto no-scrollbar">
                     <table class="w-full text-left text-xs">
                         <thead>
-                            <tr class="text-slate-400 border-b border-slate-800 pb-2">
-                                <th class="py-2">排名</th>
+                            <tr class="text-slate-400 border-b border-slate-800">
+                                <th class="py-1.5">排名</th>
                                 <th>標的</th>
                                 <th class="text-right">最新價</th>
                                 <th class="text-right">20日動能</th>
@@ -433,135 +377,135 @@
                                 <th class="text-center">狀態</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-slate-800/60">
+                        <tbody class="divide-y divide-slate-800/50">
                             
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#1</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#1</td>
                 <td class="font-medium text-slate-200">
                     <div>AAPL</div>
                     <div class="text-[10px] text-slate-500 font-mono">AAPL</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$348.51</td>
+                <td class="text-right font-mono text-slate-200">$348.51</td>
                 <td class="text-right font-mono text-emerald-400">+2.12%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">+9.6</td>
-                <td class="text-center text-xs"><span class="text-emerald-400 font-semibold">多頭</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">+9.6</td>
+                <td class="text-center text-xs"><span class="text-emerald-400 font-medium">多頭</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#2</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#2</td>
                 <td class="font-medium text-slate-200">
                     <div>MSFT</div>
                     <div class="text-[10px] text-slate-500 font-mono">MSFT</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$533.16</td>
+                <td class="text-right font-mono text-slate-200">$533.16</td>
                 <td class="text-right font-mono text-rose-400">-1.89%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">+9.2</td>
-                <td class="text-center text-xs"><span class="text-emerald-400 font-semibold">多頭</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">+9.2</td>
+                <td class="text-center text-xs"><span class="text-emerald-400 font-medium">多頭</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#3</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#3</td>
                 <td class="font-medium text-slate-200">
                     <div>AMZN</div>
                     <div class="text-[10px] text-slate-500 font-mono">AMZN</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$270.87</td>
+                <td class="text-right font-mono text-slate-200">$270.87</td>
                 <td class="text-right font-mono text-emerald-400">+4.75%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">+3.8</td>
-                <td class="text-center text-xs"><span class="text-emerald-400 font-semibold">多頭</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">+3.8</td>
+                <td class="text-center text-xs"><span class="text-emerald-400 font-medium">多頭</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#4</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#4</td>
                 <td class="font-medium text-slate-200">
                     <div>TSLA</div>
                     <div class="text-[10px] text-slate-500 font-mono">TSLA</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$379.78</td>
+                <td class="text-right font-mono text-slate-200">$379.78</td>
                 <td class="text-right font-mono text-emerald-400">+1.21%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">+3.5</td>
-                <td class="text-center text-xs"><span class="text-emerald-400 font-semibold">多頭</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">+3.5</td>
+                <td class="text-center text-xs"><span class="text-emerald-400 font-medium">多頭</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#5</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#5</td>
                 <td class="font-medium text-slate-200">
                     <div>META</div>
                     <div class="text-[10px] text-slate-500 font-mono">META</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$641.39</td>
+                <td class="text-right font-mono text-slate-200">$641.39</td>
                 <td class="text-right font-mono text-rose-400">-15.88%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">+0.0</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">+0.0</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#6</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#6</td>
                 <td class="font-medium text-slate-200">
                     <div>QQQ</div>
                     <div class="text-[10px] text-slate-500 font-mono">QQQ</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$674.76</td>
+                <td class="text-right font-mono text-slate-200">$674.76</td>
                 <td class="text-right font-mono text-rose-400">-9.25%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-7.7</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-7.7</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#7</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#7</td>
                 <td class="font-medium text-slate-200">
                     <div>AVGO</div>
                     <div class="text-[10px] text-slate-500 font-mono">AVGO</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$331.98</td>
+                <td class="text-right font-mono text-slate-200">$331.98</td>
                 <td class="text-right font-mono text-rose-400">-7.09%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-13.0</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-13.0</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#8</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#8</td>
                 <td class="font-medium text-slate-200">
                     <div>SMH</div>
                     <div class="text-[10px] text-slate-500 font-mono">SMH</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$483.63</td>
+                <td class="text-right font-mono text-slate-200">$483.63</td>
                 <td class="text-right font-mono text-rose-400">-17.77%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-17.4</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-17.4</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#9</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#9</td>
                 <td class="font-medium text-slate-200">
                     <div>GOOGL</div>
                     <div class="text-[10px] text-slate-500 font-mono">GOOGL</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$287.38</td>
+                <td class="text-right font-mono text-slate-200">$287.38</td>
                 <td class="text-right font-mono text-rose-400">-18.77%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-19.3</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-19.3</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
 
-            <tr class="hover:bg-slate-800/30 transition-colors">
-                <td class="py-2.5 font-bold text-slate-400">#10</td>
+            <tr class="hover:bg-slate-800/30">
+                <td class="py-2 text-slate-400 font-mono">#10</td>
                 <td class="font-medium text-slate-200">
                     <div>NVDA</div>
                     <div class="text-[10px] text-slate-500 font-mono">NVDA</div>
                 </td>
-                <td class="text-right font-mono font-medium text-slate-200">$168.89</td>
+                <td class="text-right font-mono text-slate-200">$168.89</td>
                 <td class="text-right font-mono text-rose-400">-26.09%</td>
-                <td class="text-right font-mono text-blue-400 font-semibold">-25.2</td>
-                <td class="text-center text-xs"><span class="text-rose-400 font-semibold">轉弱</span></td>
+                <td class="text-right font-mono text-slate-300 font-semibold">-25.2</td>
+                <td class="text-center text-xs"><span class="text-slate-400">轉弱</span></td>
             </tr>
             
                         </tbody>
@@ -570,15 +514,12 @@
             </div>
         </div>
 
-        <!-- 底部提示 -->
-        <footer class="text-center text-xs text-slate-500 pt-6">
-            <p>本儀表板專為個人量化策略輔助設計，數據源自 Yahoo Finance。</p>
-            <p class="mt-1">由 GitHub Actions 自動於每日開盤前更新。</p>
+        <footer class="text-center text-[11px] text-slate-500 pt-4">
+            數據來源: Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場
         </footer>
 
     </main>
 
-    <!-- Tab 切換腳本 -->
     <script>
         function switchTab(market) {
             const tabTw = document.getElementById('tab-tw');
