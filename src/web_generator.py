@@ -268,6 +268,23 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                 <div class="grid-val red">__TW_MDD__</div>
                             </div>
                         </div>
+
+                        <!-- 淨值走勢圖 (Equity Curve) -->
+                        <div style="margin-top: 16px; border-top: 1px dashed #1e293b; padding-top: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span style="font-size: 13px; font-weight: 600; color: #cbd5e1;">資產淨值曲線 vs 基準 ($100k 起始)</span>
+                                <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; font-family: monospace;">
+                                    <span style="display: flex; align-items: center; gap: 5px; color: #38bdf8;">
+                                        <span style="display: inline-block; width: 10px; height: 10px; background: #38bdf8; border-radius: 2px;"></span> 策略淨值
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 5px; color: #94a3b8;">
+                                        <span style="display: inline-block; width: 12px; height: 2px; background: #94a3b8; border-top: 1px dashed #94a3b8;"></span> 0052基準
+                                    </span>
+                                </div>
+                            </div>
+                            <div id="tw-equity-hud" style="font-family: monospace; font-size: 11px; color: #94a3b8; margin-bottom: 6px; min-height: 18px;"></div>
+                            <div id="tw-equity-chart" style="height: 190px; width: 100%; border-radius: 8px; overflow: hidden; background: #0b0f19; border: 1px solid #182238;"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -338,6 +355,23 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                                 <div class="grid-label">最大回撤 (MDD)</div>
                                 <div class="grid-val red">__US_MDD__</div>
                             </div>
+                        </div>
+
+                        <!-- 淨值走勢圖 (Equity Curve) -->
+                        <div style="margin-top: 16px; border-top: 1px dashed #1e293b; padding-top: 14px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                                <span style="font-size: 13px; font-weight: 600; color: #cbd5e1;">資產淨值曲線 vs 基準 ($100k 起始)</span>
+                                <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; font-family: monospace;">
+                                    <span style="display: flex; align-items: center; gap: 5px; color: #38bdf8;">
+                                        <span style="display: inline-block; width: 10px; height: 10px; background: #38bdf8; border-radius: 2px;"></span> 策略淨值
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 5px; color: #94a3b8;">
+                                        <span style="display: inline-block; width: 12px; height: 2px; background: #94a3b8; border-top: 1px dashed #94a3b8;"></span> QQQ基準
+                                    </span>
+                                </div>
+                            </div>
+                            <div id="us-equity-hud" style="font-family: monospace; font-size: 11px; color: #94a3b8; margin-bottom: 6px; min-height: 18px;"></div>
+                            <div id="us-equity-chart" style="height: 190px; width: 100%; border-radius: 8px; overflow: hidden; background: #0b0f19; border: 1px solid #182238;"></div>
                         </div>
                     </div>
                 </div>
@@ -413,9 +447,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             <!-- K 線主圖 + KD 子圖 (完全零間隙嚴密對齊) -->
-            <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:#64748b; margin-bottom:6px;">
-                <span>日 K 棒 + 20MA(紫) + 50MA生命線(黃)</span>
-                <span>長按拖曳查閱數據 / 雙指或滾輪縮放</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; font-size:12px; color:#64748b; margin-bottom:6px;">
+                <span>日 K 棒 + 20MA(紫) + 50MA生命線(黃) • <span style="color:#34d399;">▲買進</span> <span style="color:#f87171;">▼出場</span></span>
+                <span>長按拖曳回溯歷史 / 雙指或滾輪縮放</span>
             </div>
             
             <div id="mainChartContainer" class="chart-box"></div>
@@ -464,6 +498,9 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <script>
         const CURRENT_BUILD_TIME = "__UPDATE_TIME__";
         const STOCKS_DATABASE = __STOCKS_DATABASE_JSON__;
+        const EQUITY_CURVE_TW = __EQUITY_CURVE_TW_JSON__;
+        const EQUITY_CURVE_US = __EQUITY_CURVE_US_JSON__;
+
         let mainChart = null;
         let kdChart = null;
         let candleSeries = null;
@@ -474,6 +511,105 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         let dSeries = null;
         let currentStockData = null;
         let isSyncingRange = false;
+
+        let twEquityChart = null;
+        let usEquityChart = null;
+        let usEquityChartInitialized = false;
+
+        function initEquityChart(containerId, hudId, curveData, isTw) {
+            const container = document.getElementById(containerId);
+            if (!container || !curveData || !curveData.strategy || curveData.strategy.length === 0) return null;
+
+            const chart = LightweightCharts.createChart(container, {
+                width: container.clientWidth || 380,
+                height: 190,
+                layout: {
+                    background: { color: '#0b0f19' },
+                    textColor: '#64748b',
+                    fontSize: 10
+                },
+                grid: {
+                    vertLines: { color: '#131d30' },
+                    horzLines: { color: '#131d30' }
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 },
+                    horzLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 }
+                },
+                rightPriceScale: {
+                    borderColor: '#1e293b',
+                    minimumWidth: 64,
+                    scaleMargins: { top: 0.1, bottom: 0.08 }
+                },
+                timeScale: {
+                    borderColor: '#1e293b',
+                    timeVisible: false,
+                    fixLeftEdge: true,
+                    fixRightEdge: true
+                }
+            });
+
+            const strategySeries = chart.addAreaSeries({
+                lineColor: '#38bdf8',
+                topColor: 'rgba(56, 189, 248, 0.28)',
+                bottomColor: 'rgba(56, 189, 248, 0.01)',
+                lineWidth: 2,
+                priceFormat: {
+                    type: 'custom',
+                    formatter: price => '$' + Math.round(price).toLocaleString()
+                }
+            });
+            strategySeries.setData(curveData.strategy);
+
+            const benchSeries = chart.addLineSeries({
+                color: '#94a3b8',
+                lineWidth: 1.5,
+                lineStyle: 2,
+                priceFormat: {
+                    type: 'custom',
+                    formatter: price => '$' + Math.round(price).toLocaleString()
+                }
+            });
+            benchSeries.setData(curveData.benchmark);
+
+            chart.timeScale().fitContent();
+
+            const stratMap = {};
+            curveData.strategy.forEach(p => stratMap[p.time] = p.value);
+            const benchMap = {};
+            curveData.benchmark.forEach(p => benchMap[p.time] = p.value);
+
+            const hudEl = document.getElementById(hudId);
+            const benchName = isTw ? '0052' : 'QQQ';
+            const updateHud = (timeStr) => {
+                if (!hudEl) return;
+                const sVal = stratMap[timeStr];
+                const bVal = benchMap[timeStr];
+                if (sVal !== undefined && bVal !== undefined) {
+                    const sRet = ((sVal / 100000 - 1) * 100).toFixed(1);
+                    const bRet = ((bVal / 100000 - 1) * 100).toFixed(1);
+                    const sSign = sRet >= 0 ? '+' : '';
+                    const bSign = bRet >= 0 ? '+' : '';
+                    const sColor = sRet >= 0 ? '#34d399' : '#f87171';
+                    const bColor = bRet >= 0 ? '#34d399' : '#f87171';
+                    hudEl.innerHTML = `<span>📅 ${timeStr}</span> | 策略: <b style="color:#38bdf8;">$${Math.round(sVal).toLocaleString()}</b> (<span style="color:${sColor};">${sSign}${sRet}%</span>) | ${benchName}: <b style="color:#94a3b8;">$${Math.round(bVal).toLocaleString()}</b> (<span style="color:${bColor};">${bSign}${bRet}%</span>)`;
+                }
+            };
+
+            const lastItem = curveData.strategy[curveData.strategy.length - 1];
+            if (lastItem) updateHud(lastItem.time);
+
+            chart.subscribeCrosshairMove(param => {
+                if (param && param.time) {
+                    updateHud(param.time);
+                } else if (lastItem) {
+                    updateHud(lastItem.time);
+                }
+            });
+
+            return chart;
+        }
 
         function switchTab(market) {
             const tabTw = document.getElementById('tab-tw');
@@ -486,11 +622,31 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 tabUs.classList.remove('active');
                 contentTw.classList.remove('hidden');
                 contentUs.classList.add('hidden');
+                if (twEquityChart) {
+                    const w = document.getElementById('tw-equity-chart').clientWidth;
+                    if (w > 0) {
+                        twEquityChart.applyOptions({ width: w });
+                        twEquityChart.timeScale().fitContent();
+                    }
+                }
             } else {
                 tabUs.classList.add('active');
                 tabTw.classList.remove('active');
                 contentUs.classList.remove('hidden');
                 contentTw.classList.add('hidden');
+                
+                requestAnimationFrame(() => {
+                    if (!usEquityChartInitialized) {
+                        usEquityChart = initEquityChart('us-equity-chart', 'us-equity-hud', EQUITY_CURVE_US, false);
+                        usEquityChartInitialized = true;
+                    } else if (usEquityChart) {
+                        const w = document.getElementById('us-equity-chart').clientWidth;
+                        if (w > 0) {
+                            usEquityChart.applyOptions({ width: w });
+                            usEquityChart.timeScale().fitContent();
+                        }
+                    }
+                });
             }
         }
 
@@ -654,6 +810,11 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             });
             candleSeries.setData(data.candles);
 
+            // 標註歷史回測買賣點訊號 (綠色買進 ▲ / 紅色出場或停損 ▼)
+            if (data.markers && data.markers.length > 0) {
+                candleSeries.setMarkers(data.markers);
+            }
+
             sma20Series = mainChart.addLineSeries({
                 color: '#c084fc',
                 lineWidth: 1.5,
@@ -673,7 +834,11 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 priceScaleId: '',
                 scaleMargins: { top: 0.82, bottom: 0 }
             });
-            volumeSeries.setData(data.volume);
+            volumeSeries.setData(data.candles.map(c => ({
+                time: c.time,
+                value: c.v,
+                color: c.close >= c.open ? 'rgba(52, 211, 153, 0.35)' : 'rgba(248, 113, 113, 0.35)'
+            })));
 
             // 2. 建立 KD 指標子圖
             kdChart = LightweightCharts.createChart(kdContainer, {
@@ -759,10 +924,11 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             mainChart.subscribeCrosshairMove(handleMove);
             kdChart.subscribeCrosshairMove(handleMove);
 
-            // 關鍵：將可視範圍強制鎖定在 [0, totalBars - 1]，100% 鋪滿圖表兩端，無任何懸空與留白！
+            // 預設視野聚焦最近 90 根 K 棒 (~4.5 個月)，視覺飽滿清晰，亦可隨意往左拖曳回溯全部歷史買賣點
             const totalBars = data.candles.length;
-            const fullRange = { from: 0, to: totalBars - 1 };
-            mainChart.timeScale().setVisibleLogicalRange(fullRange);
+            const defaultBars = 90;
+            const startBar = Math.max(0, totalBars - defaultBars);
+            mainChart.timeScale().setVisibleLogicalRange({ from: startBar, to: totalBars - 1 });
         }
 
         window.addEventListener('resize', () => {
@@ -771,9 +937,30 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 if (w > 0) {
                     mainChart.applyOptions({ width: w });
                     kdChart.applyOptions({ width: w });
-                    mainChart.timeScale().setVisibleLogicalRange({ from: 0, to: currentStockData.candles.length - 1 });
+                    const totalBars = currentStockData.candles.length;
+                    const startBar = Math.max(0, totalBars - 90);
+                    mainChart.timeScale().setVisibleLogicalRange({ from: startBar, to: totalBars - 1 });
                 }
             }
+            if (twEquityChart) {
+                const w = document.getElementById('tw-equity-chart').clientWidth;
+                if (w > 0) {
+                    twEquityChart.applyOptions({ width: w });
+                    twEquityChart.timeScale().fitContent();
+                }
+            }
+            if (usEquityChart && usEquityChartInitialized) {
+                const w = document.getElementById('us-equity-chart').clientWidth;
+                if (w > 0) {
+                    usEquityChart.applyOptions({ width: w });
+                    usEquityChart.timeScale().fitContent();
+                }
+            }
+        });
+
+        // 頁面載入時初始化台股淨值圖
+        window.addEventListener('DOMContentLoaded', () => {
+            twEquityChart = initEquityChart('tw-equity-chart', 'tw-equity-hud', EQUITY_CURVE_TW, true);
         });
 
         // ================= 自動熱更新機制 (背景定時檢查 + 喚醒比對) =================
@@ -976,14 +1163,48 @@ class WebDashboardGenerator:
             rows.append(row_html)
         return "".join(rows)
 
+    @staticmethod
+    def build_equity_curve_data(perf_df: pd.DataFrame, dataset: Dict[str, pd.DataFrame], bench_ticker: str) -> dict:
+        """生成策略資產淨值與對應基準 ETF (0052/QQQ) 之等權起點對比序列"""
+        if perf_df.empty:
+            return {"strategy": [], "benchmark": []}
+        
+        bench_df = dataset.get(bench_ticker)
+        b_base = None
+        if bench_df is not None and not bench_df.empty:
+            sub_b = bench_df.loc[bench_df.index >= perf_df.index[0]]
+            if not sub_b.empty:
+                b_base = float(sub_b.iloc[0]["close"])
+                
+        strategy_series = []
+        bench_series = []
+        last_b_val = 100000.0
+
+        for dt, row in perf_df.iterrows():
+            date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)[:10]
+            s_val = round(float(row["portfolio_value"]), 2)
+            strategy_series.append({"time": date_str, "value": s_val})
+
+            if bench_df is not None and dt in bench_df.index and b_base and b_base > 0:
+                curr_b_price = float(bench_df.loc[dt, "close"])
+                last_b_val = round(100000.0 * (curr_b_price / b_base), 2)
+            bench_series.append({"time": date_str, "value": last_b_val})
+
+        return {"strategy": strategy_series, "benchmark": bench_series}
+
     @classmethod
-    def build_stocks_database_json(cls, dataset: Dict[str, pd.DataFrame]) -> str:
-        """打包近 120 交易日 (約半年最適觀測窗口) 的歷史數據供 TradingView 渲染"""
+    def build_stocks_database_json(
+        cls, 
+        dataset: Dict[str, pd.DataFrame],
+        tw_trades_df: Optional[pd.DataFrame] = None,
+        us_trades_df: Optional[pd.DataFrame] = None
+    ) -> str:
+        """打包歷史數據與回測買賣點供 TradingView 渲染"""
         from src.features import TechFeatureEngine
         db = {}
         for ticker, raw_df in dataset.items():
             enriched = TechFeatureEngine.calculate_technical_features(raw_df)
-            sub = enriched.tail(120)
+            sub = enriched.iloc[60:] if len(enriched) > 60 else enriched
             
             latest = enriched.iloc[-1]
             is_tw = (".TW" in ticker) or (".TWO" in ticker)
@@ -994,7 +1215,6 @@ class WebDashboardGenerator:
             bias_50 = ((curr_price - sma50_val) / sma50_val) * 100
 
             candles = []
-            volumes = []
             sma20_list = []
             sma50_list = []
             kd_k_list = []
@@ -1008,12 +1228,7 @@ class WebDashboardGenerator:
                 c = round(float(row["close"]), 2)
                 v = int(row["volume"])
 
-                candles.append({"time": date_str, "open": o, "high": h, "low": l, "close": c})
-                volumes.append({
-                    "time": date_str,
-                    "value": v,
-                    "color": "rgba(52, 211, 153, 0.35)" if c >= o else "rgba(248, 113, 113, 0.35)"
-                })
+                candles.append({"time": date_str, "open": o, "high": h, "low": l, "close": c, "v": v})
 
                 if not np.isnan(row.get("sma_20", np.nan)):
                     sma20_list.append({"time": date_str, "value": round(float(row["sma_20"]), 2)})
@@ -1023,6 +1238,44 @@ class WebDashboardGenerator:
                     kd_k_list.append({"time": date_str, "value": round(float(row["k_9"]), 2)})
                 if not np.isnan(row.get("d_9", np.nan)):
                     kd_d_list.append({"time": date_str, "value": round(float(row["d_9"]), 2)})
+
+            # 提取該標的之歷史買賣點標註
+            trades_df = tw_trades_df if is_tw else us_trades_df
+            markers = []
+            candle_times = set(c["time"] for c in candles)
+            if trades_df is not None and not trades_df.empty and "ticker" in trades_df.columns:
+                stock_trades = trades_df[trades_df["ticker"] == ticker]
+                for _, tr in stock_trades.iterrows():
+                    tr_date = tr["date"]
+                    d_str = tr_date.strftime("%Y-%m-%d") if hasattr(tr_date, "strftime") else str(tr_date)[:10]
+                    if d_str not in candle_times:
+                        continue
+                    
+                    action = tr["action"]
+                    px = tr["price"]
+                    if action == "BUY":
+                        markers.append({
+                            "time": d_str,
+                            "position": "belowBar",
+                            "color": "#34d399",
+                            "shape": "arrowUp",
+                            "text": f"買 {px:,.1f}"
+                        })
+                    else:
+                        pnl_str = tr.get("pnl_pct", "")
+                        is_stop = "停損" in str(tr.get("reason", ""))
+                        tag = "停損" if is_stop else "賣"
+                        txt = f"{tag} {px:,.1f}"
+                        if pnl_str:
+                            txt += f" ({pnl_str})"
+                        markers.append({
+                            "time": d_str,
+                            "position": "aboveBar",
+                            "color": "#f87171",
+                            "shape": "arrowDown",
+                            "text": txt
+                        })
+            markers.sort(key=lambda m: m["time"])
 
             db[ticker] = {
                 "ticker": ticker,
@@ -1038,11 +1291,11 @@ class WebDashboardGenerator:
                 "latest_k": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
                 "latest_d": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
                 "candles": candles,
-                "volume": volumes,
                 "sma20": sma20_list,
                 "sma50": sma50_list,
                 "kd_k": kd_k_list,
-                "kd_d": kd_d_list
+                "kd_d": kd_d_list,
+                "markers": markers
             }
 
         return json.dumps(db, ensure_ascii=False)
@@ -1086,8 +1339,18 @@ class WebDashboardGenerator:
         tw_portfolio_html = PortfolioTracker.generate_portfolio_html(portfolio_positions, "TW")
         us_portfolio_html = PortfolioTracker.generate_portfolio_html(portfolio_positions, "US")
 
-        # 5. TradingView 交互數據
-        stocks_db_json = cls.build_stocks_database_json(dataset)
+        # 5. 回測淨值曲線數據 (Area Chart vs Benchmark)
+        tw_equity_curve = cls.build_equity_curve_data(tw_backtest.get("perf_df", pd.DataFrame()), dataset, "0052.TW")
+        us_equity_curve = cls.build_equity_curve_data(us_backtest.get("perf_df", pd.DataFrame()), dataset, "QQQ")
+        tw_equity_json = json.dumps(tw_equity_curve, ensure_ascii=False)
+        us_equity_json = json.dumps(us_equity_curve, ensure_ascii=False)
+
+        # 6. TradingView 交互數據 (含 K 線買賣點標註)
+        stocks_db_json = cls.build_stocks_database_json(
+            dataset,
+            tw_trades_df=tw_backtest.get("trades_df"),
+            us_trades_df=us_backtest.get("trades_df")
+        )
 
         # 替換模板
         html = RESPONSIVE_HTML_TEMPLATE
@@ -1117,6 +1380,8 @@ class WebDashboardGenerator:
         html = html.replace("__TW_PORTFOLIO__", tw_portfolio_html)
         html = html.replace("__US_PORTFOLIO__", us_portfolio_html)
 
+        html = html.replace("__EQUITY_CURVE_TW_JSON__", tw_equity_json)
+        html = html.replace("__EQUITY_CURVE_US_JSON__", us_equity_json)
         html = html.replace("__STOCKS_DATABASE_JSON__", stocks_db_json)
         html = html.replace("__MASCOT_BASE64__", MASCOT_BASE64)
 
