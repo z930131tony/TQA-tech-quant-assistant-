@@ -1094,8 +1094,35 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 """
 
 class WebDashboardGenerator:
+    @classmethod
+    def select_recommendations(cls, rank_df: pd.DataFrame) -> pd.DataFrame:
+        """
+        篩選 Top 3 推薦卡片標的：
+        優先篩選 above_50sma == True 且 composite_score (score) > 0 的健康多頭標的。
+        若該市場符合條件之標的不滿 3 檔，取全部合格者，並由其餘標的按評分由高至低依序補足至 3 檔。
+        """
+        if rank_df is None or rank_df.empty:
+            return pd.DataFrame()
+            
+        score_col = "score" if "score" in rank_df.columns else "composite_score"
+        
+        # 1. 優先篩選站上 50MA 且評分大於 0 的多頭標的
+        bullish = rank_df[(rank_df["above_50sma"] == True) & (rank_df[score_col] > 0)].copy()
+        
+        if len(bullish) >= 3:
+            return bullish.head(3).reset_index(drop=True)
+            
+        # 2. 若不滿 3 檔，取所有合格標的，並由其餘標的 (按評分降序) 補足至 3 檔
+        selected_tickers = set(bullish["ticker"])
+        remaining = rank_df[~rank_df["ticker"].isin(selected_tickers)].sort_values(by=score_col, ascending=False)
+        needed = 3 - len(bullish)
+        fillers = remaining.head(needed)
+        
+        res = pd.concat([bullish, fillers], ignore_index=True)
+        return res
+
     @staticmethod
-    def build_recommendation_html(top_df: pd.DataFrame, is_tw: bool) -> str:
+    def build_recommendation_html(top_df: pd.DataFrame, is_tw: bool, is_market_bull: bool = True) -> str:
         items = []
         for idx, row in top_df.iterrows():
             ticker = row["ticker"]
@@ -1103,10 +1130,20 @@ class WebDashboardGenerator:
             price = row.get("price", row.get("close", 0.0))
             roc20 = row.get("roc_20d", row.get("roc_20", 0.0))
             score = row.get("score", row.get("composite_score", 0.0))
+            above50 = bool(row.get("above_50sma", False))
             prefix = "NT$" if is_tw else "$"
             
             roc_color = "#34d399" if roc20 >= 0 else "#f87171"
             roc_sign = "+" if roc20 >= 0 else ""
+            
+            # 【關鍵修復】：若標的跌破 50MA，或大盤處於保守防禦且個股破線，加上醒目橘紅標籤
+            warning_badge_html = ""
+            if not above50:
+                warning_badge_html = """
+                <div style="margin-top: 4px;">
+                    <span style="background: rgba(234, 88, 12, 0.18); border: 1px solid rgba(249, 115, 22, 0.7); color: #fb923c; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">⚠️ 跌破50MA・觀望勿追</span>
+                </div>
+                """
             
             item_html = f"""
             <div onclick="openStockModal('{ticker}')" class="stock-item">
@@ -1120,11 +1157,81 @@ class WebDashboardGenerator:
                 <div style="text-align: right;">
                     <div style="font-weight: bold; font-family: monospace; font-size: 15px;">{prefix}{price:,.2f}</div>
                     <div style="color: {roc_color}; font-size: 13px; font-family: monospace;">{roc_sign}{roc20:.2f}%</div>
+                    {warning_badge_html}
                 </div>
             </div>
             """
             items.append(item_html)
         return "".join(items)
+
+    @staticmethod
+    def build_portfolio_html(evaluated_positions: list, market_type: str = "TW") -> str:
+        """產生網頁儀表板中的持股卡片 HTML (美股支援小數點後兩位損益)"""
+        filtered = [p for p in evaluated_positions if (p.get("is_tw", False) if market_type == "TW" else not p.get("is_tw", False))]
+        if not filtered:
+            return """
+            <div style="background: #182238; border: 1px dashed #243049; border-radius: 10px; padding: 20px; text-align: center; color: #64748b;">
+                目前尚未設定自訂持股。可透過 Google Sheets 雲端試算表或 <code>portfolio.json</code> 同步您的庫存標的。
+            </div>
+            """
+
+        rows = []
+        for p in filtered:
+            is_tw = p.get("is_tw", False)
+            prefix = "NT$" if is_tw else "$"
+            ret_pct = p.get("return_pct", 0.0)
+            ret_color = "#34d399" if ret_pct >= 0 else "#f87171"
+            pnl_val = p.get("unrealized_pnl", 0.0)
+            
+            # 美股未實現損益金額保留小數點後兩位 (例如 +$13.14 / -$11.65)，台股維持整數顯示 (例如 +NT$5,000 / -NT$5,000)
+            pnl_sign = "+" if pnl_val >= 0 else "-"
+            if is_tw:
+                pnl_str = f"({pnl_sign}NT${abs(pnl_val):,.0f})"
+            else:
+                pnl_str = f"({pnl_sign}${abs(pnl_val):,.2f})"
+            
+            badge_html = f'<span class="badge badge-bear" style="background:#450a0a; color:#f87171; border:1px solid #991b1b;">⚠️ {p.get("alert_text", "")}</span>' if p.get("has_alert") else '<span class="badge badge-bull">✅ 續抱中</span>'
+            
+            row = f"""
+            <tr class="clickable" onclick="openStockModal('{p.get('ticker')}')">
+                <td>
+                    <div style="font-weight:bold; color:#f1f5f9;">{p.get('name')}</div>
+                    <div style="font-size:12px; color:#64748b; font-family:monospace;">{p.get('ticker')} ({int(p.get('shares', 0))} 股)</div>
+                </td>
+                <td class="text-right font-mono">{prefix}{p.get('cost_price', 0.0):,.2f}</td>
+                <td class="text-right font-mono" style="font-weight:bold;">{prefix}{p.get('curr_price', 0.0):,.2f}</td>
+                <td class="text-right font-mono" style="color:{ret_color}; font-weight:bold;">
+                    {'+' if ret_pct >= 0 else ''}{ret_pct:.2f}%<br>
+                    <span style="font-size:11px; opacity:0.85;">{pnl_str}</span>
+                </td>
+                <td class="text-right font-mono desktop-only" style="color: {'#f87171' if p.get('drawdown_from_peak', 0.0) <= -8 else '#94a3b8'};">
+                    {p.get('drawdown_from_peak', 0.0):.1f}%
+                </td>
+                <td class="text-center">{badge_html}</td>
+            </tr>
+            """
+            rows.append(row)
+
+        table_html = f"""
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>持股標的</th>
+                        <th class="text-right">買進成本</th>
+                        <th class="text-right">現價</th>
+                        <th class="text-right">未實現損益</th>
+                        <th class="text-right desktop-only">自高點回檔</th>
+                        <th class="text-center">狀態 / 風控</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {''.join(rows)}
+                </tbody>
+            </table>
+        </div>
+        """
+        return table_html
 
     @staticmethod
     def build_table_rows_html(df: pd.DataFrame, is_tw: bool) -> str:
@@ -1221,13 +1328,17 @@ class WebDashboardGenerator:
             kd_d_list = []
 
             for d, row in sub.iterrows():
-                date_str = d.strftime("%Y-%m-%d")
                 o = round(float(row["open"]), 2)
                 h = round(float(row["high"]), 2)
                 l = round(float(row["low"]), 2)
                 c = round(float(row["close"]), 2)
                 v = int(row["volume"])
 
+                # 【關鍵修復】：過濾掉 volume <= 0 或 close <= 0 的無效交易日 (防範幽靈 K 棒)
+                if v <= 0 or c <= 0:
+                    continue
+
+                date_str = d.strftime("%Y-%m-%d")
                 candles.append({"time": date_str, "open": o, "high": h, "low": l, "close": c, "v": v})
 
                 if not np.isnan(row.get("sma_20", np.nan)):
@@ -1308,15 +1419,16 @@ class WebDashboardGenerator:
         tw_date = tw_rank.iloc[0].get("data_date", "-") if not tw_rank.empty else "-"
         us_date = us_rank.iloc[0].get("data_date", "-") if not us_rank.empty else "-"
 
-        # 1. 操作指示卡
-        tw_top3 = tw_rank.head(3)
-        tw_market_bull = (tw_top3["above_50sma"].sum() >= 2)
+        # 1. 操作指示卡與 Top 3 推薦卡片 (優先篩選 50MA 之上且動能 > 0 標的)
+        tw_raw_top3 = tw_rank.head(3)
+        tw_market_bull = (tw_raw_top3["above_50sma"].sum() >= 2) if not tw_raw_top3.empty else False
         tw_state_badge = "badge-bull" if tw_market_bull else "badge-bear"
         tw_state_text = "多頭攻擊：持股續抱 / 換股" if tw_market_bull else "保守防禦：留意停利 / 停損"
-        tw_recom_html = cls.build_recommendation_html(tw_top3, is_tw=True)
+        tw_top3_candidates = cls.select_recommendations(tw_rank)
+        tw_recom_html = cls.build_recommendation_html(tw_top3_candidates, is_tw=True, is_market_bull=tw_market_bull)
 
-        us_top3 = us_rank.head(3)
-        us_bull_count = us_top3["above_50sma"].sum()
+        us_raw_top3 = us_rank.head(3)
+        us_bull_count = us_raw_top3["above_50sma"].sum() if not us_raw_top3.empty else 0
         qqq_df = dataset.get("QQQ")
         qqq_bull = True
         if qqq_df is not None and not qqq_df.empty:
@@ -1326,7 +1438,8 @@ class WebDashboardGenerator:
         us_market_bull = (us_bull_count >= 2 and qqq_bull)
         us_state_badge = "badge-bull" if us_market_bull else "badge-bear"
         us_state_text = "多頭攻擊：持股續抱 / 換股" if us_market_bull else "保守防禦：留意停利 / 停損"
-        us_recom_html = cls.build_recommendation_html(us_top3, is_tw=False)
+        us_top3_candidates = cls.select_recommendations(us_rank)
+        us_recom_html = cls.build_recommendation_html(us_top3_candidates, is_tw=False, is_market_bull=us_market_bull)
 
         # 2. 歷史回測數據
         tw_tot = f"{tw_backtest.get('total_return_pct', tw_backtest.get('total_return', 0.0)):+.2f}%"
@@ -1345,8 +1458,8 @@ class WebDashboardGenerator:
 
         # 4. 個人持股風控監控 (Portfolio & Risk Tracker)
         portfolio_positions = PortfolioTracker.evaluate_portfolio(dataset)
-        tw_portfolio_html = PortfolioTracker.generate_portfolio_html(portfolio_positions, "TW")
-        us_portfolio_html = PortfolioTracker.generate_portfolio_html(portfolio_positions, "US")
+        tw_portfolio_html = cls.build_portfolio_html(portfolio_positions, "TW")
+        us_portfolio_html = cls.build_portfolio_html(portfolio_positions, "US")
 
         # 5. 回測淨值曲線數據 (Area Chart vs Benchmark)
         tw_equity_curve = cls.build_equity_curve_data(tw_backtest.get("perf_df", pd.DataFrame()), dataset, "0050.TW")

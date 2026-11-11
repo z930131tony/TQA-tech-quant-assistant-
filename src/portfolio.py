@@ -229,15 +229,24 @@ class PortfolioTracker:
         if not filtered:
             return """
             <div style="background: #182238; border: 1px dashed #243049; border-radius: 10px; padding: 20px; text-align: center; color: #64748b;">
-                目前尚未設定自訂持股。可在 <code>portfolio.json</code> 新增您的庫存標的。
+                目前尚未設定自訂持股。可透過 Google Sheets 雲端試算表或 <code>portfolio.json</code> 同步您的庫存標的。
             </div>
             """
 
         rows = []
         for p in filtered:
-            prefix = "NT$" if p["is_tw"] else "$"
-            ret_color = "#34d399" if p["return_pct"] >= 0 else "#f87171"
-            pnl_sign = "+" if p["unrealized_pnl"] >= 0 else ""
+            is_tw = p.get("is_tw", False)
+            prefix = "NT$" if is_tw else "$"
+            ret_pct = p.get("return_pct", 0.0)
+            ret_color = "#34d399" if ret_pct >= 0 else "#f87171"
+            pnl_val = p.get("unrealized_pnl", 0.0)
+            
+            # 美股未實現損益金額保留小數點後兩位 (例如 +$13.14 / -$11.65)，台股維持整數顯示 (例如 +NT$5,000 / -NT$5,000)
+            pnl_sign = "+" if pnl_val >= 0 else "-"
+            if is_tw:
+                pnl_str = f"({pnl_sign}NT${abs(pnl_val):,.0f})"
+            else:
+                pnl_str = f"({pnl_sign}${abs(pnl_val):,.2f})"
             
             badge_html = f'<span class="badge badge-bear" style="background:#450a0a; color:#f87171; border:1px solid #991b1b;">⚠️ {p["alert_text"]}</span>' if p["has_alert"] else '<span class="badge badge-bull">✅ 續抱中</span>'
             
@@ -250,8 +259,8 @@ class PortfolioTracker:
                 <td class="text-right font-mono">{prefix}{p['cost_price']:,.2f}</td>
                 <td class="text-right font-mono" style="font-weight:bold;">{prefix}{p['curr_price']:,.2f}</td>
                 <td class="text-right font-mono" style="color:{ret_color}; font-weight:bold;">
-                    {pnl_sign}{p['return_pct']:.2f}%<br>
-                    <span style="font-size:11px; opacity:0.85;">({prefix}{p['unrealized_pnl']:,.0f})</span>
+                    {'+' if ret_pct >= 0 else ''}{ret_pct:.2f}%<br>
+                    <span style="font-size:11px; opacity:0.85;">{pnl_str}</span>
                 </td>
                 <td class="text-right font-mono desktop-only" style="color: {'#f87171' if p['drawdown_from_peak'] <= -8 else '#94a3b8'};">
                     {p['drawdown_from_peak']:.1f}%
