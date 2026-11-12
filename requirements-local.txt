@@ -1,2 +1,3 @@
-# 本地執行與實盤下單專用套件 (GitHub Actions 雲端免裝，保持雲端建置極速輕量)
-shioaji>=1.7.0
+# 本地端永豐大戶投 API 串接套件 (不於 GitHub Actions 雲端安裝)
+shioaji>=1.2.0
+python-dotenv>=1.0.0
