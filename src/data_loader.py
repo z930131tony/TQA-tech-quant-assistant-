@@ -38,7 +38,10 @@ class TechDataLoader:
         """
         clean_id = ticker.split(".")[0].strip()
         lookback = days if days else config.lookback_days
-        min_rows = min(30, max(5, lookback // 3))
+        if lookback >= 365:
+            min_rows = max(120, int(lookback * 0.45))
+        else:
+            min_rows = min(30, max(5, lookback // 3))
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
         
         url = "https://api.finmindtrade.com/api/v4/data"
@@ -90,8 +93,12 @@ class TechDataLoader:
         """
         cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
         lookback = days if days else config.lookback_days
-        min_rows = min(30, max(5, lookback // 3))
+        if lookback >= 365:
+            min_rows = max(120, int(lookback * 0.45))
+        else:
+            min_rows = min(30, max(5, lookback // 3))
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
+        allow_save_cache = (days is None) or (days >= config.lookback_days)
 
         # 快取唯讀模式：若指定 cache_only 且檔案存在，直接讀取並清洗
         if cache_only and os.path.exists(cache_file):
@@ -141,11 +148,19 @@ class TechDataLoader:
                 df_fm = self._clean_data_frame(df_fm)
                 # 檢查 FinMind 是否有未還原股票分割 (台股單日漲跌幅上限為 10%，跌幅 > 35% 必為未還原分割)
                 has_unadjusted_split = bool((df_fm["close"].pct_change() < -0.35).any())
-                if not has_unadjusted_split and len(df_fm) >= min_rows:
-                    df_fm.to_csv(cache_file)
+                
+                # 檢查 FinMind 最新日期是否落後於同市場基準最新日期 (若落後則不可直接回傳，繼續往下走 yfinance 備援)
+                fm_lagging = False
+                if benchmark_latest_date is not None and not df_fm.empty:
+                    if df_fm.index[-1].date() < benchmark_latest_date.date():
+                        fm_lagging = True
+
+                if not fm_lagging and not has_unadjusted_split and len(df_fm) >= min_rows:
+                    if allow_save_cache:
+                        df_fm.to_csv(cache_file)
                     return df_fm
 
-        # 2. 美股標的，或台股 FinMind 失敗時，走 yfinance 備援
+        # 2. 美股標的，或台股 FinMind 失敗/落後時，走 yfinance 備援
         try:
             df = yf.download(
                 ticker, 
@@ -209,8 +224,9 @@ class TechDataLoader:
                 print(f"[警告] {ticker} 清洗後資料量不足 ({len(df)} < {min_rows})")
                 return None
 
-            # 寫入本機快取
-            df.to_csv(cache_file)
+            # 僅在完整回測天數下載時寫入本機快取，防止短測試覆蓋快取
+            if allow_save_cache:
+                df.to_csv(cache_file)
             return df
             
         except Exception as e:
@@ -295,6 +311,31 @@ class TechDataLoader:
                         )
                         if df_refreshed is not None:
                             dataset[t] = df_refreshed
+
+        # 3. 橫截面最後日期一致性校驗 (無論 cache_only 為 True 或 False，若標的超出基準日則截斷對齊)
+        tw_tickers = [t for t in TECH_UNIVERSE_TW.keys() if t in dataset]
+        if tw_tickers:
+            if "0050.TW" in dataset and not dataset["0050.TW"].empty:
+                target_tw_date = dataset["0050.TW"].index[-1].date()
+            else:
+                tw_dates_series = pd.Series([dataset[t].index[-1].date() for t in tw_tickers])
+                target_tw_date = tw_dates_series.mode()[0]
+            for t in tw_tickers:
+                d = dataset[t]
+                if not d.empty and d.index[-1].date() > target_tw_date:
+                    dataset[t] = d[d.index.date <= target_tw_date]
+
+        us_tickers = [t for t in TECH_UNIVERSE_US if t in dataset]
+        if us_tickers:
+            if "QQQ" in dataset and not dataset["QQQ"].empty:
+                target_us_date = dataset["QQQ"].index[-1].date()
+            else:
+                us_dates_series = pd.Series([dataset[t].index[-1].date() for t in us_tickers])
+                target_us_date = us_dates_series.mode()[0]
+            for t in us_tickers:
+                d = dataset[t]
+                if not d.empty and d.index[-1].date() > target_us_date:
+                    dataset[t] = d[d.index.date <= target_us_date]
 
         print(f"數據下載完成，共成功載入 {len(dataset)} 檔標的。")
         return dataset

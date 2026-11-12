@@ -12,11 +12,16 @@ venv/
 data_cache/
 *.bin
 --listformat
+mock_sheet.csv
 
-# Environment variables & secrets
+# Environment variables & credentials
 .env
+*.env
 *.pem
 *.key
 *.pfx
 *.p12
+*.log
 shioaji.log
+*API.md
+*api.md

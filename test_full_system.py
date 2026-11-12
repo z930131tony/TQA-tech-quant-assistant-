@@ -55,8 +55,8 @@ results["FinMind台股抓取"] = (len(tw_failures) == 0)
 print("\n[測試 2/6] 驗證 FinMind 斷線時自動降級切換至 yfinance 備援...")
 try:
     # 測試故意傳入無效 FinMind 標的或模擬異常，看 fetch_ticker_data 是否切換 yfinance
-    # 比如美股 NVDA 本來就該走 yfinance
-    df_us = loader.fetch_ticker_data("NVDA", days=60)
+    # 比如美股 NVDA 本來就該走 yfinance (改用完整預設天數，避免短測試覆蓋快取)
+    df_us = loader.fetch_ticker_data("NVDA")
     has_us = df_us is not None and not df_us.empty
     
     # 測試台股若 FinMind 找不到 (例如給定不存在代碼)，回傳 None 且不崩潰
