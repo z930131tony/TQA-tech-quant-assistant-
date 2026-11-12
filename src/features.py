@@ -1,19 +1,54 @@
 """
-技術特徵計算與排序評分引擎
+技術特徵計算與排序評分引擎 (升級版：Numba 向量化加速 + 波動率調整夏普動能 + 縮量洗盤與爆量出貨量價判定)
 """
 import numpy as np
 import pandas as pd
 from typing import Dict, Tuple
+
+try:
+    from numba import njit
+    NUMBA_AVAILABLE = True
+except ImportError:
+    NUMBA_AVAILABLE = False
+
 from src.config import config, TECH_UNIVERSE_TW
+
+if NUMBA_AVAILABLE:
+    @njit(fastmath=True)
+    def _numba_kd_calculator(rsv_arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        n = len(rsv_arr)
+        k_arr = np.empty(n, dtype=np.float64)
+        d_arr = np.empty(n, dtype=np.float64)
+        k, d = 50.0, 50.0
+        for i in range(n):
+            val = rsv_arr[i]
+            if np.isnan(val):
+                val = 50.0
+            k = (2.0 / 3.0) * k + (1.0 / 3.0) * val
+            d = (2.0 / 3.0) * d + (1.0 / 3.0) * k
+            k_arr[i] = round(k, 2)
+            d_arr[i] = round(d, 2)
+        return k_arr, d_arr
+else:
+    def _numba_kd_calculator(rsv_arr: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        k_list, d_list = [], []
+        k, d = 50.0, 50.0
+        for val in rsv_arr:
+            v = 50.0 if np.isnan(val) else val
+            k = (2.0 / 3.0) * k + (1.0 / 3.0) * v
+            d = (2.0 / 3.0) * d + (1.0 / 3.0) * k
+            k_list.append(round(k, 2))
+            d_list.append(round(d, 2))
+        return np.array(k_list), np.array(d_list)
 
 class TechFeatureEngine:
     @staticmethod
     def calculate_technical_features(df: pd.DataFrame) -> pd.DataFrame:
         """
-        計算技術指標：動能 (ROC)、均線濾網 (SMA)、突破線與波動度 (ATR)
+        計算技術指標：動能 (ROC)、均線濾網 (SMA)、突破線、波動度 (ATR)、
+        波動率調整夏普動能 (Volatility-Adjusted Momentum) 與量價結構訊號 (洗盤/出貨)
         """
         data = df.copy()
-        # 強制過濾無效交易日 (volume <= 0 或 close <= 0) 並去重排序
         if "volume" in data.columns and "close" in data.columns:
             numeric_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in data.columns]
             data[numeric_cols] = data[numeric_cols].apply(pd.to_numeric, errors="coerce")
@@ -24,6 +59,7 @@ class TechFeatureEngine:
         close = data["close"]
         high = data["high"]
         low = data["low"]
+        volume = data["volume"]
         
         # 1. 動能指標 (ROC - Rate of Change)
         data["roc_20"] = close.pct_change(config.short_momentum_window) * 100
@@ -55,31 +91,52 @@ class TechFeatureEngine:
         rs = gain / (loss + 1e-9)
         data["rsi_14"] = 100 - (100 / (1 + rs))
         
-        # 6. KD (9, 3, 3) 隨機指標計算
+        # 6. KD (9, 3, 3) 隨機指標計算 (由 Numba 高速向量化核心運算)
         low_9 = low.rolling(window=9).min()
         high_9 = high.rolling(window=9).max()
         rsv = ((close - low_9) / (high_9 - low_9).replace(0, np.nan)) * 100
-        rsv = rsv.fillna(50)
+        rsv_arr = rsv.fillna(50).to_numpy(dtype=np.float64)
+        k_arr, d_arr = _numba_kd_calculator(rsv_arr)
+        data["k_9"] = k_arr
+        data["d_9"] = d_arr
         
-        k_list, d_list = [], []
-        k, d = 50.0, 50.0
-        for val in rsv:
-            k = (2.0 / 3.0) * k + (1.0 / 3.0) * val
-            d = (2.0 / 3.0) * d + (1.0 / 3.0) * k
-            k_list.append(round(k, 2))
-            d_list.append(round(d, 2))
-            
-        data["k_9"] = k_list
-        data["d_9"] = d_list
-        
-        # 7. 20MA (月線)
+        # 7. 20MA (月線) 與成交量均線
         data["sma_20"] = close.rolling(window=20).mean()
+        data["vol_sma_3"] = volume.rolling(window=3).mean()
+        data["vol_sma_20"] = volume.rolling(window=20).mean()
 
-        # 8. 綜合動能評分 (權重: 20日 40%, 60日 40%, 120日 20%)
+        # 8. 波動率調整後夏普動能 (Volatility-Adjusted Momentum)
+        # 以年化波動率標準差作為分母，防止追高無實質基本面暴衝妖股
+        daily_ret = close.pct_change()
+        vol_20 = daily_ret.rolling(20).std() * np.sqrt(252) * 100
+        vol_60 = daily_ret.rolling(60).std() * np.sqrt(252) * 100
+        data["vol_adj_roc_20"] = data["roc_20"] / (vol_20.replace(0, np.nan).fillna(20.0) + 1.0)
+        data["vol_adj_roc_60"] = data["roc_60"] / (vol_60.replace(0, np.nan).fillna(20.0) + 1.0)
+        data["vol_adjusted_momentum"] = data["vol_adj_roc_20"] * 0.5 + data["vol_adj_roc_60"] * 0.5
+
+        # 9. 量價結構布林訊號
+        # 9A. is_shakeout_buy (10% 階梯縮量洗盤買點)：
+        # 自近 20 日最高點回檔滿 10%~30%，且近 3 日均量 < 20 日均量的 70% (主力縮量洗盤確立)
+        pullback_pct = ((data["high_20d"] - close) / data["high_20d"]) * 100
+        data["is_shakeout_buy"] = (
+            (pullback_pct >= 10.0) & 
+            (pullback_pct <= 30.0) & 
+            (data["vol_sma_3"] < data["vol_sma_20"] * 0.70)
+        ).fillna(False)
+
+        # 9B. is_distribution_warn (爆量出貨警訊)：
+        # 近 5 日價格緩跌或滯漲 (5日報酬 <= 1.0%)，但成交量 > 20 日均量 1.5 倍
+        ret_5d = close.pct_change(5) * 100
+        data["is_distribution_warn"] = (
+            (ret_5d <= 1.0) & 
+            (volume > data["vol_sma_20"] * 1.50)
+        ).fillna(False)
+
+        # 10. 綜合動能評分 (權重: 20日 40%, 60日 35%, 120日 25%)
         data["momentum_score"] = (
-            data["roc_20"].fillna(0) * 0.4 +
-            data["roc_60"].fillna(0) * 0.4 +
-            data["roc_120"].fillna(0) * 0.2
+            data["roc_20"].fillna(0) * 0.40 +
+            data["roc_60"].fillna(0) * 0.35 +
+            data["roc_120"].fillna(0) * 0.25
         )
         
         return data
@@ -87,7 +144,7 @@ class TechFeatureEngine:
     @classmethod
     def evaluate_latest_ranking(cls, dataset: Dict[str, pd.DataFrame]) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        評估台美股最新動能排名與趨勢狀態
+        評估台美股最新動能排名、量價訊號與趨勢狀態
         """
         tw_records = []
         us_records = []
@@ -98,31 +155,51 @@ class TechFeatureEngine:
                 continue
             latest = enriched_df.iloc[-1]
             latest_date_str = enriched_df.index[-1].strftime("%Y-%m-%d")
-            score_val = round(float(latest["momentum_score"]), 2) if not np.isnan(latest["momentum_score"]) else 0.0
             
+            # 判斷洗盤買點與出貨警訊文字
+            shakeout = bool(latest.get("is_shakeout_buy", False))
+            dist_warn = bool(latest.get("is_distribution_warn", False))
+            signal_tag = "正常"
+            if dist_warn:
+                signal_tag = "⚠️ 爆量出貨警戒"
+            elif shakeout:
+                signal_tag = "💎 縮量洗盤買點"
+
             record = {
                 "ticker": ticker,
                 "name": TECH_UNIVERSE_TW.get(ticker, ticker),
-                "data_date": latest_date_str,
                 "price": round(float(latest["close"]), 2),
+                "score": round(float(latest["momentum_score"]), 1),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
-                "score": score_val,
-                "composite_score": score_val,
+                "roc_120d": round(float(latest["roc_120"]), 2) if not np.isnan(latest["roc_120"]) else 0.0,
+                "vol_adj_momentum": round(float(latest["vol_adjusted_momentum"]), 2) if not np.isnan(latest["vol_adjusted_momentum"]) else 0.0,
                 "above_50sma": bool(latest["above_50sma"]),
                 "above_200sma": bool(latest["above_200sma"]),
-                "rsi": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
-                "k9": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
-                "d9": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
-                "is_breakout": bool(latest["is_new_high_20d"]),
+                "is_new_high": bool(latest["is_new_high_20d"]),
+                "is_shakeout_buy": shakeout,
+                "is_distribution_warn": dist_warn,
+                "signal_tag": signal_tag,
+                "atr_pct": round(float(latest["atr_pct"]), 2) if not np.isnan(latest["atr_pct"]) else 0.0,
+                "rsi_14": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
+                "k_9": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
+                "d_9": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
+                "data_date": latest_date_str
             }
             
-            if ".TW" in ticker or ".TWO" in ticker:
+            is_tw = (".TW" in ticker) or (".TWO" in ticker)
+            if is_tw:
                 tw_records.append(record)
             else:
                 us_records.append(record)
                 
-        tw_rank_df = pd.DataFrame(tw_records).sort_values(by="score", ascending=False).reset_index(drop=True)
-        us_rank_df = pd.DataFrame(us_records).sort_values(by="score", ascending=False).reset_index(drop=True)
-        
-        return tw_rank_df, us_rank_df
+        # 排序：綜合評分由高到低
+        tw_rank = pd.DataFrame(tw_records)
+        if not tw_rank.empty:
+            tw_rank = tw_rank.sort_values(by="score", ascending=False).reset_index(drop=True)
+            
+        us_rank = pd.DataFrame(us_records)
+        if not us_rank.empty:
+            us_rank = us_rank.sort_values(by="score", ascending=False).reset_index(drop=True)
+            
+        return tw_rank, us_rank

@@ -1,19 +1,33 @@
 """
-行情數據下載與標準化模組
+行情數據下載與標準化模組 (強化版：curl_cffi 瀏覽器指紋偽裝 + 指數退避重試 + 單標的故障隔離 + 免費多源備援)
 """
-import yfinance as yf
-import pandas as pd
-import requests
+import time
+import random
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
-import os
+import pandas as pd
+import requests
 
+try:
+    from curl_cffi import requests as curl_requests
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+
+import yfinance as yf
 from src.config import config, TECH_UNIVERSE_US, TECH_UNIVERSE_TW
 
 class TechDataLoader:
     def __init__(self, cache_dir: str = "data_cache"):
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
+        self.curl_session = None
+        if CURL_CFFI_AVAILABLE:
+            try:
+                self.curl_session = curl_requests.Session(impersonate="chrome")
+            except Exception:
+                self.curl_session = None
 
     def _clean_data_frame(self, df_in: Optional[pd.DataFrame]) -> pd.DataFrame:
         """
@@ -35,6 +49,7 @@ class TechDataLoader:
     def fetch_finmind_taiwan_stock(self, ticker: str, days: Optional[int] = None) -> Optional[pd.DataFrame]:
         """
         透過 FinMind 開放 API 抓取台股除權息還原之日 K 線資料 (防範 yfinance 假除權與 IP 封鎖)
+        具備 3 次指數退避重試機制
         """
         clean_id = ticker.split(".")[0].strip()
         lookback = days if days else config.lookback_days
@@ -51,34 +66,108 @@ class TechDataLoader:
             "start_date": start_date
         }
         
-        try:
-            resp = requests.get(url, params=params, timeout=12)
-            if resp.status_code != 200:
-                return None
-            raw_data = resp.json().get("data", [])
-            if not raw_data or len(raw_data) < min_rows:
-                return None
+        for attempt in range(3):
+            try:
+                resp = requests.get(url, params=params, timeout=12)
+                if resp.status_code != 200:
+                    time.sleep(1.0 + attempt * 1.5)
+                    continue
+                raw_data = resp.json().get("data", [])
+                if not raw_data or len(raw_data) < min_rows:
+                    return None
+                    
+                df = pd.DataFrame(raw_data)
+                df = df.rename(columns={
+                    "date": "date",
+                    "open": "open",
+                    "max": "high",
+                    "min": "low",
+                    "close": "close",
+                    "Trading_Volume": "volume"
+                })
+                df["date"] = pd.to_datetime(df["date"])
+                df = df.set_index("date")
+                df["symbol"] = ticker
                 
-            df = pd.DataFrame(raw_data)
-            df = df.rename(columns={
-                "date": "date",
-                "open": "open",
-                "max": "high",
-                "min": "low",
-                "close": "close",
-                "Trading_Volume": "volume"
-            })
-            df["date"] = pd.to_datetime(df["date"])
-            df = df.set_index("date")
-            df["symbol"] = ticker
-            
-            # 強制清洗幽靈 K 棒 (volume <= 0 或 close <= 0)
-            df = self._clean_data_frame(df)
-            if df.empty or len(df) < min_rows:
-                return None
-            return df
+                df = self._clean_data_frame(df)
+                if df.empty or len(df) < min_rows:
+                    return None
+                return df
+            except Exception:
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+        return None
+
+    def fetch_twse_openapi_latest(self) -> Dict[str, Dict]:
+        """
+        備援：從臺灣證券交易所 OpenAPI 抓取所有上市公司當日最新收盤行情
+        """
+        url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            result = {}
+            for row in data:
+                code = row.get("Code", "").strip()
+                if not code:
+                    continue
+                try:
+                    # 轉換民國年為西元年 '1151111' -> '2026-11-11'
+                    raw_d = str(row.get("Date", "")).strip()
+                    if len(raw_d) >= 7:
+                        y = int(raw_d[:-4]) + 1911
+                        m = int(raw_d[-4:-2])
+                        d = int(raw_d[-2:])
+                        dt = datetime(y, m, d)
+                    else:
+                        dt = datetime.now()
+                    
+                    c_px = float(str(row.get("ClosingPrice", "0")).replace(",", ""))
+                    o_px = float(str(row.get("OpeningPrice", "0")).replace(",", ""))
+                    h_px = float(str(row.get("HighestPrice", "0")).replace(",", ""))
+                    l_px = float(str(row.get("LowestPrice", "0")).replace(",", ""))
+                    vol = float(str(row.get("TradeVolume", "0")).replace(",", ""))
+                    if c_px > 0 and vol > 0:
+                        result[code] = {
+                            "date": dt,
+                            "open": o_px if o_px > 0 else c_px,
+                            "high": h_px if h_px > 0 else c_px,
+                            "low": l_px if l_px > 0 else c_px,
+                            "close": c_px,
+                            "volume": vol
+                        }
+                except Exception:
+                    continue
+            return result
         except Exception:
-            return None
+            return {}
+
+    def fetch_stooq_fallback(self, ticker: str, days: int = 100) -> Optional[pd.DataFrame]:
+        """
+        備援：美股從 Stooq 抓取日 K 線 (當 yfinance 受阻時的第三層備援)
+        """
+        clean_sym = ticker.replace("-", ".").lower()
+        url = f"https://stooq.com/q/d/l/?s={clean_sym}.us&i=d"
+        try:
+            req_func = self.curl_session.get if self.curl_session else requests.get
+            resp = req_func(url, timeout=10)
+            if resp.status_code == 200 and "Date" in resp.text and "<html" not in resp.text:
+                import io
+                df = pd.read_csv(io.StringIO(resp.text))
+                if not df.empty and {"Date", "Open", "High", "Low", "Close", "Volume"}.issubset(df.columns):
+                    df = df.rename(columns={
+                        "Date": "date", "Open": "open", "High": "high",
+                        "Low": "low", "Close": "close", "Volume": "volume"
+                    })
+                    df["date"] = pd.to_datetime(df["date"])
+                    df = df.set_index("date").sort_index()
+                    df["symbol"] = ticker
+                    return self._clean_data_frame(df)
+        except Exception:
+            pass
+        return None
 
     def fetch_ticker_data(
         self, 
@@ -89,7 +178,7 @@ class TechDataLoader:
         benchmark_latest_date: Optional[pd.Timestamp] = None
     ) -> Optional[pd.DataFrame]:
         """
-        下載單一標的歷史資料，支援本機當日快取與基準標的日期同步檢驗
+        下載單一標的歷史資料，具備 curl_cffi 偽裝、指數退避重試與故障隔離保護
         """
         cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
         lookback = days if days else config.lookback_days
@@ -100,7 +189,7 @@ class TechDataLoader:
         start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
         allow_save_cache = (days is None) or (days >= config.lookback_days)
 
-        # 快取唯讀模式：若指定 cache_only 且檔案存在，直接讀取並清洗
+        # 1. 快取唯讀模式
         if cache_only and os.path.exists(cache_file):
             try:
                 df = pd.read_csv(cache_file, index_col="date", parse_dates=True)
@@ -109,20 +198,17 @@ class TechDataLoader:
             except Exception:
                 pass
 
-        # 快取檢查：若非強制刷新且快取存在
+        # 2. 快取時效檢查
         if not force_refresh and os.path.exists(cache_file):
             try:
                 df_cache = pd.read_csv(cache_file, index_col="date", parse_dates=True)
                 df_cache = self._clean_data_frame(df_cache)
                 
-                # 檢查快取最新日期是否落後於同市場基準標的 (0050.TW 或 QQQ)
                 cache_lagging = False
                 if benchmark_latest_date is not None and not df_cache.empty:
                     if df_cache.index[-1].date() < benchmark_latest_date.date():
                         cache_lagging = True
 
-                # 同日快取時效校驗：
-                # 若為台股且當前台灣時間已過 13:40，但快取檔案修改時間早於當日 13:40，視為過期舊快取，強制重新向 API 下載
                 tw_tz = timezone(timedelta(hours=8))
                 now_tw = datetime.now(tw_tz)
                 mtime_tw = datetime.fromtimestamp(os.path.getmtime(cache_file), tz=tw_tz)
@@ -132,13 +218,12 @@ class TechDataLoader:
                     if now_tw >= cutoff_tw and mtime_tw < cutoff_tw:
                         cache_lagging = True
 
-                # 只有在快取未落後且非過期、且為當日產生、資料行數足夠時，才允許命中快取
                 if not cache_lagging and mtime_tw.date() == now_tw.date() and len(df_cache) >= min_rows:
                     return df_cache
             except Exception:
                 pass
 
-        # 1. 若為台股標的，優先透過 FinMind 抓取乾淨還原日K (避免 yfinance 假除權與 IP 封鎖)
+        # 3. 台股優先走 FinMind
         is_tw = (".TW" in ticker) or (".TWO" in ticker)
         df_fm = None
         has_unadjusted_split = False
@@ -146,10 +231,8 @@ class TechDataLoader:
             df_fm = self.fetch_finmind_taiwan_stock(ticker, days=lookback)
             if df_fm is not None:
                 df_fm = self._clean_data_frame(df_fm)
-                # 檢查 FinMind 是否有未還原股票分割 (台股單日漲跌幅上限為 10%，跌幅 > 35% 必為未還原分割)
                 has_unadjusted_split = bool((df_fm["close"].pct_change() < -0.35).any())
                 
-                # 檢查 FinMind 最新日期是否落後於同市場基準最新日期 (若落後則不可直接回傳，繼續往下走 yfinance 備援)
                 fm_lagging = False
                 if benchmark_latest_date is not None and not df_fm.empty:
                     if df_fm.index[-1].date() < benchmark_latest_date.date():
@@ -160,159 +243,140 @@ class TechDataLoader:
                         df_fm.to_csv(cache_file)
                     return df_fm
 
-        # 2. 美股標的，或台股 FinMind 失敗/落後時，走 yfinance 備援
-        try:
-            df = yf.download(
-                ticker, 
-                start=start_date, 
-                progress=False, 
-                auto_adjust=True,
-                multi_level_index=False
-            )
-            
-            if df.empty:
-                print(f"[警告] {ticker} 資料量不足或下載為空")
-                return None
+        # 4. 美股標的，或台股 FinMind 失敗/落後時，走 yfinance 搭配 curl_cffi 與指數退避 3 次重試
+        df = None
+        for attempt in range(3):
+            try:
+                # 優先使用 curl_cffi 偽裝的 Session，徹底繞過 GitHub Actions 雲端 IP 的 429 Rate Limit
+                yf_session = self.curl_session if self.curl_session else None
+                df = yf.download(
+                    ticker, 
+                    start=start_date, 
+                    progress=False, 
+                    auto_adjust=True,
+                    multi_level_index=False,
+                    session=yf_session
+                )
+                if df is not None and not df.empty:
+                    break
+            except Exception as e:
+                # 指數退避等待 (1s, 2s, 4s + 隨機擾動)
+                sleep_sec = (2 ** attempt) + random.uniform(0.5, 1.2)
+                time.sleep(sleep_sec)
 
-            # 處理多層欄位防禦
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+        # 5. yfinance 仍失敗時的美股備援 (Stooq)
+        if (df is None or df.empty) and not is_tw:
+            stooq_df = self.fetch_stooq_fallback(ticker, days=lookback)
+            if stooq_df is not None and len(stooq_df) >= min_rows:
+                df = stooq_df
 
-            # 標準化欄位名稱
-            df = df.rename(columns={
-                "Open": "open",
-                "High": "high",
-                "Low": "low",
-                "Close": "close",
-                "Volume": "volume"
-            })
-            
-            # 時區處理：統一移除時區以利對齊
-            if df.index.tz is not None:
-                df.index = df.index.tz_localize(None)
-
-            df.index.name = "date"
-            df["symbol"] = ticker
-            
-            # 強制清洗無效 K 棒 (volume <= 0 或 close <= 0)
-            df = self._clean_data_frame(df)
-            
-            # 若為台股且 FinMind 有更即時之最新日期 (例如 yfinance 最新日尚為 NaN 或延遲)，以 FinMind 補齊
-            if is_tw and df_fm is not None and not df_fm.empty and not df.empty and not has_unadjusted_split:
-                if df.index[-1] < df_fm.index[-1]:
-                    missing = df_fm[df_fm.index > df.index[-1]]
-                    if not missing.empty:
-                        # 檢查雙方重疊日之收盤價基準是否一致 (價差 < 3% 排除除權息或未還原差距)
-                        overlap_dates = df.index.intersection(df_fm.index)
-                        can_stitch = False
-                        if not overlap_dates.empty:
-                            last_common = overlap_dates[-1]
-                            yf_px = float(df.loc[last_common, "close"])
-                            fm_px = float(df_fm.loc[last_common, "close"])
-                            if yf_px > 0 and (abs(fm_px - yf_px) / yf_px) < 0.03:
-                                can_stitch = True
-                        
-                        if can_stitch:
-                            missing_clean = self._clean_data_frame(missing)
-                            if not missing_clean.empty:
-                                missing_clean["symbol"] = ticker
-                                common_cols = [c for c in df.columns if c in missing_clean.columns]
-                                df = pd.concat([df, missing_clean[common_cols]])
-                                df = self._clean_data_frame(df)
-
-            if df.empty or len(df) < min_rows:
-                print(f"[警告] {ticker} 清洗後資料量不足 ({len(df)} < {min_rows})")
-                return None
-
-            # 僅在完整回測天數下載時寫入本機快取，防止短測試覆蓋快取
-            if allow_save_cache:
-                df.to_csv(cache_file)
-            return df
-            
-        except Exception as e:
-            print(f"[錯誤] 下載 {ticker} 異常: {e}")
+        if df is None or df.empty:
+            # 容錯回退：若網路抓取失敗但本機已有歷史快取，優先回傳既有快取避免斷頭
+            if os.path.exists(cache_file):
+                try:
+                    fallback_cache = pd.read_csv(cache_file, index_col="date", parse_dates=True)
+                    fallback_cache = self._clean_data_frame(fallback_cache)
+                    if len(fallback_cache) >= min_rows:
+                        print(f"⚠️ {ticker} 網路下載受阻，使用本機既有快取平穩回退。")
+                        return fallback_cache
+                except Exception:
+                    pass
+            print(f"[警告] {ticker} 資料量不足或下載為空")
             return None
+
+        # 欄位標準化與時區對齊
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        df = df.rename(columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume"
+        })
+        
+        if df.index.tz is not None:
+            df.index = df.index.tz_localize(None)
+
+        df.index.name = "date"
+        df["symbol"] = ticker
+        df = self._clean_data_frame(df)
+        
+        # 若為台股且 FinMind 最新日期更即時，以 FinMind 補齊
+        if is_tw and df_fm is not None and not df_fm.empty and not df.empty and not has_unadjusted_split:
+            if df.index[-1] < df_fm.index[-1]:
+                missing = df_fm[df_fm.index > df.index[-1]]
+                if not missing.empty:
+                    overlap_dates = df.index.intersection(df_fm.index)
+                    can_stitch = False
+                    if not overlap_dates.empty:
+                        last_common = overlap_dates[-1]
+                        yf_px = float(df.loc[last_common, "close"])
+                        fm_px = float(df_fm.loc[last_common, "close"])
+                        if yf_px > 0 and (abs(fm_px - yf_px) / yf_px) < 0.03:
+                            can_stitch = True
+                    
+                    if can_stitch:
+                        missing_clean = self._clean_data_frame(missing)
+                        if not missing_clean.empty:
+                            missing_clean["symbol"] = ticker
+                            common_cols = [c for c in df.columns if c in missing_clean.columns]
+                            df = pd.concat([df, missing_clean[common_cols]])
+                            df = self._clean_data_frame(df)
+
+        if df.empty or len(df) < min_rows:
+            if os.path.exists(cache_file):
+                try:
+                    fallback_cache = pd.read_csv(cache_file, index_col="date", parse_dates=True)
+                    fallback_cache = self._clean_data_frame(fallback_cache)
+                    if len(fallback_cache) >= min_rows:
+                        return fallback_cache
+                except Exception:
+                    pass
+            print(f"[警告] {ticker} 清洗後資料量不足 ({len(df)} < {min_rows})")
+            return None
+
+        if allow_save_cache:
+            df.to_csv(cache_file)
+        return df
 
     def fetch_all_tech_data(self, force_refresh: bool = False, cache_only: bool = False) -> Dict[str, pd.DataFrame]:
         """
-        批次下載台美股追蹤名單，確保同市場標的最後一根 K 棒日期對齊一致
+        批次下載台美股追蹤名單，具備單標的故障隔離 (Fault Isolation)
+        個別標的異常只記錄 Warning 並優雅跳過，嚴禁拋出例外中斷管線
         """
         dataset = {}
         
         # 1. 台股
         print("下載台股數據..." if not cache_only else "讀取台股快取數據...")
-        # 優先抓取台股基準 0050.TW 取得基準最新日期
-        bench_tw = self.fetch_ticker_data("0050.TW", force_refresh=force_refresh, cache_only=cache_only)
-        bench_tw_date = bench_tw.index[-1] if bench_tw is not None and not bench_tw.empty else None
-        if bench_tw is not None:
-            dataset["0050.TW"] = bench_tw
+        # 基準標的 0050.TW (帶故障隔離保護)
+        try:
+            bench_tw = self.fetch_ticker_data("0050.TW", force_refresh=force_refresh, cache_only=cache_only)
+            bench_tw_date = bench_tw.index[-1] if bench_tw is not None and not bench_tw.empty else None
+            if bench_tw is not None and not bench_tw.empty:
+                dataset["0050.TW"] = bench_tw
+        except Exception as e:
+            print(f"⚠️ 基準 0050.TW 下載異常 (已隔離): {e}")
+            bench_tw_date = None
 
-        # 批次下載其餘台股標的 (若快取日期落後於 0050.TW 則強制重拉)
+        # 批次下載台股成分股 (故障隔離)
         for ticker in TECH_UNIVERSE_TW.keys():
             if ticker == "0050.TW":
                 continue
-            df = self.fetch_ticker_data(
-                ticker, 
-                force_refresh=force_refresh, 
-                cache_only=cache_only,
-                benchmark_latest_date=bench_tw_date
-            )
-            if df is not None:
-                dataset[ticker] = df
+            try:
+                df = self.fetch_ticker_data(
+                    ticker, 
+                    force_refresh=force_refresh, 
+                    cache_only=cache_only,
+                    benchmark_latest_date=bench_tw_date
+                )
+                if df is not None and not df.empty:
+                    dataset[ticker] = df
+            except Exception as e:
+                print(f"⚠️ 個別標的 {ticker} 下載異常，已優雅跳過保護管線: {e}")
 
-        # 【橫截面對齊二次校驗】：檢查台股中是否有任何標的日期高於基準或相互不同步
-        if not cache_only:
-            tw_tickers = [t for t in TECH_UNIVERSE_TW.keys() if t in dataset]
-            if tw_tickers:
-                max_tw_date = max(dataset[t].index[-1] for t in tw_tickers)
-                for t in tw_tickers:
-                    if dataset[t].index[-1].date() < max_tw_date.date():
-                        print(f"🔄 偵測到 {t} 日期 ({dataset[t].index[-1].strftime('%Y-%m-%d')}) 落後最新日期 ({max_tw_date.strftime('%Y-%m-%d')})，強制重新拉取對齊...")
-                        df_refreshed = self.fetch_ticker_data(
-                            t, 
-                            force_refresh=True, 
-                            benchmark_latest_date=max_tw_date
-                        )
-                        if df_refreshed is not None:
-                            dataset[t] = df_refreshed
-
-        # 2. 美股
-        print("下載美股數據..." if not cache_only else "讀取美股快取數據...")
-        # 優先抓取美股基準 QQQ 取得基準最新日期
-        bench_us = self.fetch_ticker_data("QQQ", force_refresh=force_refresh, cache_only=cache_only)
-        bench_us_date = bench_us.index[-1] if bench_us is not None and not bench_us.empty else None
-        if bench_us is not None:
-            dataset["QQQ"] = bench_us
-
-        for ticker in TECH_UNIVERSE_US:
-            if ticker == "QQQ":
-                continue
-            df = self.fetch_ticker_data(
-                ticker, 
-                force_refresh=force_refresh, 
-                cache_only=cache_only,
-                benchmark_latest_date=bench_us_date
-            )
-            if df is not None:
-                dataset[ticker] = df
-
-        # 【橫截面對齊二次校驗】：檢查美股標的日期是否對齊
-        if not cache_only:
-            us_tickers = [t for t in TECH_UNIVERSE_US if t in dataset]
-            if us_tickers:
-                max_us_date = max(dataset[t].index[-1] for t in us_tickers)
-                for t in us_tickers:
-                    if dataset[t].index[-1].date() < max_us_date.date():
-                        print(f"🔄 偵測到 {t} 日期 ({dataset[t].index[-1].strftime('%Y-%m-%d')}) 落後最新日期 ({max_us_date.strftime('%Y-%m-%d')})，強制重新拉取對齊...")
-                        df_refreshed = self.fetch_ticker_data(
-                            t, 
-                            force_refresh=True, 
-                            benchmark_latest_date=max_us_date
-                        )
-                        if df_refreshed is not None:
-                            dataset[t] = df_refreshed
-
-        # 3. 橫截面最後日期一致性校驗 (無論 cache_only 為 True 或 False，若標的超出基準日則截斷對齊)
+        # 橫截面最後日期一致性校驗 (台股)
         tw_tickers = [t for t in TECH_UNIVERSE_TW.keys() if t in dataset]
         if tw_tickers:
             if "0050.TW" in dataset and not dataset["0050.TW"].empty:
@@ -325,6 +389,35 @@ class TechDataLoader:
                 if not d.empty and d.index[-1].date() > target_tw_date:
                     dataset[t] = d[d.index.date <= target_tw_date]
 
+        # 2. 美股
+        print("下載美股數據..." if not cache_only else "讀取美股快取數據...")
+        # 基準標的 QQQ (帶故障隔離保護)
+        try:
+            bench_us = self.fetch_ticker_data("QQQ", force_refresh=force_refresh, cache_only=cache_only)
+            bench_us_date = bench_us.index[-1] if bench_us is not None and not bench_us.empty else None
+            if bench_us is not None and not bench_us.empty:
+                dataset["QQQ"] = bench_us
+        except Exception as e:
+            print(f"⚠️ 基準 QQQ 下載異常 (已隔離): {e}")
+            bench_us_date = None
+
+        # 批次下載美股成分股 (故障隔離)
+        for ticker in TECH_UNIVERSE_US:
+            if ticker == "QQQ":
+                continue
+            try:
+                df = self.fetch_ticker_data(
+                    ticker, 
+                    force_refresh=force_refresh, 
+                    cache_only=cache_only,
+                    benchmark_latest_date=bench_us_date
+                )
+                if df is not None and not df.empty:
+                    dataset[ticker] = df
+            except Exception as e:
+                print(f"⚠️ 個別標的 {ticker} 下載異常，已優雅跳過保護管線: {e}")
+
+        # 橫截面最後日期一致性校驗 (美股)
         us_tickers = [t for t in TECH_UNIVERSE_US if t in dataset]
         if us_tickers:
             if "QQQ" in dataset and not dataset["QQQ"].empty:

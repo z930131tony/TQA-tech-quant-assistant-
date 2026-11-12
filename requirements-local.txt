@@ -1,0 +1,3 @@
+# 本地端永豐大戶投 API 串接套件 (不於 GitHub Actions 雲端安裝)
+shioaji>=1.2.0
+python-dotenv>=1.0.0

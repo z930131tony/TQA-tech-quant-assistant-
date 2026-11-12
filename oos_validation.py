@@ -346,14 +346,26 @@ def main():
     # 5. 隔日開盤執行時延檢驗
     lag_ok = run_execution_lag_test(dataset)
 
+    # 6. PyBroker 截面輪動與抗過度擬合 (Anti-Overfitting) 檢驗
     print("\n" + "=" * 75)
-    if causality_ok and anomalies_ok and oos_ok and wf_ok and lag_ok:
-        print("🎉 總結：五大機構級檢驗全數通過！")
+    print("【檢驗 6】PyBroker 截面動能輪動與參數過度擬合 (Anti-Overfitting) 驗證")
+    print("=" * 75)
+    bt = TechBacktester(dataset=dataset)
+    pyb_tw = bt.run_pybroker_validation(market="TW")
+    pyb_us = bt.run_pybroker_validation(market="US")
+    print(f"  台股市場 PyBroker 截面驗證: {'✅ PASS' if pyb_tw.get('status') == 'PASS' else 'ℹ️ SKIPPED'} ({pyb_tw.get('message')})")
+    print(f"  美股市場 PyBroker 截面驗證: {'✅ PASS' if pyb_us.get('status') == 'PASS' else 'ℹ️ SKIPPED'} ({pyb_us.get('message')})")
+    pyb_ok = (pyb_tw.get("status") == "PASS" and pyb_us.get("status") == "PASS")
+
+    print("\n" + "=" * 75)
+    if causality_ok and anomalies_ok and oos_ok and wf_ok and lag_ok and pyb_ok:
+        print("🎉 總結：六大機構級檢驗全數通過！")
         print("   ✅ 特徵因果：0 未來數據外洩")
         print("   ✅ 數據品質：0 拆股除權失真")
         print("   ✅ 盲測泛化：夏普維持 > 0.7、Alpha > 0、回撤擴大比 <= 1.5")
         print("   ✅ 步進穩定：多個歷史切分點 Alpha 全數為正")
         print("   ✅ 實戰抗延：隔日開盤成交年化仍達 45%~59%")
+        print("   ✅ 截面架構：PyBroker 多標的截面輪動與抗過度擬合檢驗通過")
     else:
         print("⚠️ 總結：部分檢驗項目未達標，請查閱上述詳細報告確認潛在風險。")
     print("===========================================================================\n")

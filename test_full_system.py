@@ -35,7 +35,7 @@ print("======================================================================")
 # -------------------------------------------------------------
 # 測試 1: FinMind 數據源與格式檢驗 (20 檔台股)
 # -------------------------------------------------------------
-print("\n[測試 1/6] 驗證 FinMind 官方 API 抓取台股（含 .TW 與 .TWO 櫃買標的）...")
+print("\n[測試 1/8] 驗證 FinMind 官方 API 抓取台股（含 .TW 與 .TWO 櫃買標的）...")
 loader = TechDataLoader()
 tw_failures = []
 sample_symbols = ["2330.TW", "3324.TWO", "0050.TW", "6223.TWO"]
@@ -52,7 +52,7 @@ results["FinMind台股抓取"] = (len(tw_failures) == 0)
 # -------------------------------------------------------------
 # 測試 2: yfinance 容錯備援切換機制 (Failover)
 # -------------------------------------------------------------
-print("\n[測試 2/6] 驗證 FinMind 斷線時自動降級切換至 yfinance 備援...")
+print("\n[測試 2/8] 驗證 FinMind 斷線時自動降級切換至 yfinance 備援...")
 try:
     # 測試故意傳入無效 FinMind 標的或模擬異常，看 fetch_ticker_data 是否切換 yfinance
     # 比如美股 NVDA 本來就該走 yfinance (改用完整預設天數，避免短測試覆蓋快取)
@@ -75,7 +75,7 @@ except Exception as e:
 # -------------------------------------------------------------
 # 測試 3: 模擬交易分流邏輯 (TW 時段不碰美股，US 時段不碰台股)
 # -------------------------------------------------------------
-print("\n[測試 3/6] 驗證交易引擎分流 (target_market: TW vs US)...")
+print("\n[測試 3/8] 驗證交易引擎分流 (target_market: TW vs US)...")
 # 隔離雲端環境變數與備份真實 portfolio.json，避免測試誤碰真實雲端或 Webhook
 cloud_env_keys = ["PORTFOLIO_SHEET_URL", "SUPABASE_URL", "SUPABASE_KEY", "PORTFOLIO_WEBHOOK_URL"]
 saved_env = {k: os.environ.get(k) for k in cloud_env_keys}
@@ -120,7 +120,7 @@ finally:
 # -------------------------------------------------------------
 # 測試 4: 庫存雲端適配器 (Google Sheets / 本地 JSON) 與風控
 # -------------------------------------------------------------
-print("\n[測試 4/6] 驗證持倉雲端適配器 (Google Sheets CSV / 本地回退) 與風控評估...")
+print("\n[測試 4/8] 驗證持倉雲端適配器 (Google Sheets CSV / 本地回退) 與風控評估...")
 try:
     # 4A. 本地 portfolio.json 讀取測試
     positions = PortfolioTracker.load_portfolio()
@@ -160,7 +160,7 @@ finally:
 # -------------------------------------------------------------
 # 測試 5: 網頁 HTML 結構與 TradingView 語法檢查
 # -------------------------------------------------------------
-print("\n[測試 5/6] 驗證 index.html 檔案結構與 TradingView 腳本健康度...")
+print("\n[測試 5/8] 驗證 index.html 檔案結構與 TradingView 腳本健康度...")
 try:
     html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
     with open(html_path, "r", encoding="utf-8") as f:
@@ -170,16 +170,20 @@ try:
     has_tw_tab = "content-tw" in html
     has_us_tab = "content-us" in html
     has_mascot = "mascot-avatar" in html
-    no_raw_tokens = ("__TW_RECOMMENDATIONS__" not in html) and ("__UPDATE_TIME__" not in html)
+    has_ai_arena = "AI 多空對抗戰情室" in html
+    has_odd_calc = "exportPortfolioJson" in html
+    no_raw_tokens = ("__TW_RECOMMENDATIONS__" not in html) and ("__UPDATE_TIME__" not in html) and ("__TW_AI_DEBATE__" not in html)
     size_kb = len(html) / 1024
 
     print(f"  ✅ HTML 檔案大小: {size_kb:.1f} KB")
     print(f"  ✅ TradingView 腳本存在: {has_tv}")
     print(f"  ✅ 雙市場 Tab 分頁存在: {has_tw_tab and has_us_tab}")
     print(f"  ✅ 吉祥物小黃雞桌寵模組存在: {has_mascot}")
+    print(f"  ✅ AI 多空對決戰情卡片存在: {has_ai_arena}")
+    print(f"  ✅ 零股精算與持倉 JSON 匯入匯出存在: {has_odd_calc}")
     print(f"  ✅ 模板標籤無殘留未替換: {no_raw_tokens}")
 
-    results["儀表板網頁健康度"] = (has_tv and has_tw_tab and has_us_tab and has_mascot and no_raw_tokens)
+    results["儀表板網頁健康度"] = (has_tv and has_tw_tab and has_us_tab and has_mascot and has_ai_arena and has_odd_calc and no_raw_tokens)
 except Exception as e:
     print(f"  ❌ 網頁檢查異常: {e}")
     results["儀表板網頁健康度"] = False
@@ -187,7 +191,7 @@ except Exception as e:
 # -------------------------------------------------------------
 # 測試 6: GitHub Actions 工作流 YAML 語法驗證
 # -------------------------------------------------------------
-print("\n[測試 6/6] 驗證 GitHub Actions daily_schedule.yml 語法與排程定義...")
+print("\n[測試 6/8] 驗證 GitHub Actions daily_schedule.yml 語法與排程定義...")
 try:
     yml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".github", "workflows", "daily_schedule.yml")
     with open(yml_path, "r", encoding="utf-8") as f:
@@ -213,6 +217,73 @@ except Exception as e:
     results["GitHub排程工作流"] = False
 
 # -------------------------------------------------------------
+# 測試 7: Numba KD 加速運算、夏普動能與量價訊號
+# -------------------------------------------------------------
+print("\n[測試 7/8] 驗證 Numba KD 運算、夏普波動率調整動能與量價結構...")
+try:
+    sample_df = dataset.get("2330.TW")
+    if sample_df is not None and not sample_df.empty:
+        feats = TechFeatureEngine.calculate_technical_features(sample_df)
+        has_numba_kd = ("k_9" in feats.columns and "d_9" in feats.columns)
+        has_vol_mom = ("vol_adjusted_momentum" in feats.columns and "vol_adj_roc_20" in feats.columns)
+        has_volume_signals = ("is_shakeout_buy" in feats.columns and "is_distribution_warn" in feats.columns)
+        
+        kd_val = float(feats["k_9"].iloc[-1])
+        vol_mom_val = float(feats["vol_adjusted_momentum"].iloc[-1])
+        shakeout_count = int(feats["is_shakeout_buy"].sum())
+        dist_count = int(feats["is_distribution_warn"].sum())
+
+        print(f"  ✅ Numba 加速 KD 計算: K={kd_val:.1f}, D={float(feats['d_9'].iloc[-1]):.1f}")
+        print(f"  ✅ 夏普波動率調整動能: {vol_mom_val:.2f}")
+        print(f"  ✅ 階梯縮量洗盤訊號 (is_shakeout_buy) 總計: {shakeout_count} 次")
+        print(f"  ✅ 爆量出貨警訊 (is_distribution_warn) 總計: {dist_count} 次")
+
+        results["Numba量價特徵工程"] = (has_numba_kd and has_vol_mom and has_volume_signals)
+    else:
+        results["Numba量價特徵工程"] = False
+except Exception as e:
+    print(f"  ❌ 特徵運算異常: {e}")
+    results["Numba量價特徵工程"] = False
+
+# -------------------------------------------------------------
+# 測試 8: TradingAgents AI 辯論降級機制與 Shioaji API 動態相容
+# -------------------------------------------------------------
+print("\n[測試 8/8] 驗證 TradingAgents AI 辯論降級相容與 Shioaji API 安全防護...")
+try:
+    from src.ai_debate import conduct_single_debate, fetch_yahoo_news
+    from src.trader import SHIOAJI_AVAILABLE
+
+    # 1. 測試在無 API Key 下，AI 辯論模組優雅降級為量化規則合成
+    fake_tech = {
+        "price": 1050.0,
+        "score": 85.0,
+        "above_50sma": True,
+        "is_shakeout_buy": True,
+        "is_distribution_warn": False
+    }
+    debate_res = conduct_single_debate(
+        ticker="2330.TW",
+        name="台積電",
+        price=1050.0,
+        tech_info=fake_tech,
+        news_headlines=["台積電先進製程滿載"],
+        api_key=None
+    )
+    fallback_ok = (debate_res.get("verdict") == "STRONG_BUY" and debate_res.get("step_buy_10pct_price") == 945.0)
+
+    # 2. 測試 Shioaji 動態導入 (不論環境有無安裝皆能安全運作)
+    trader_obj = AutoTrader(dataset=dataset)
+    shioaji_safe = hasattr(trader_obj, "execute_semi_auto_order") and hasattr(trader_obj, "sync_shioaji_positions")
+
+    print(f"  ✅ AI 多空辯論引擎無 Key 降級保護: {fallback_ok} (Verdict: {debate_res.get('verdict')})")
+    print(f"  ✅ 永豐 Shioaji 動態相容性 (本機安裝狀態: {SHIOAJI_AVAILABLE}): {shioaji_safe}")
+
+    results["AI辯論與Shioaji防護"] = (fallback_ok and shioaji_safe)
+except Exception as e:
+    print(f"  ❌ AI 與下單相容測試異常: {e}")
+    results["AI辯論與Shioaji防護"] = False
+
+# -------------------------------------------------------------
 # 綜合測試匯總報告
 # -------------------------------------------------------------
 print("\n" + "=" * 70)
@@ -226,7 +297,7 @@ for name, ok in results.items():
 
 print("-" * 70)
 if all_ok:
-    print("🎉 恭喜！全系統 6 大模組自主測試 100% 全數通過，無任何潛在漏洞！")
+    print("🎉 恭喜！全系統 8 大模組自主測試 100% 全數通過，無任何潛在漏洞！")
 else:
     print("⚠️ 警告：部分模組測試未通過，請查看上方詳細日誌。")
 print("======================================================================\n")

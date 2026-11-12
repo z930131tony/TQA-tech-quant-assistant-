@@ -1,9 +1,9 @@
 """
-個人投資組合與風控追蹤模組 (Portfolio & Risk Tracker)
+個人投資組合與風控追蹤模組 (Portfolio & Risk Tracker - 雙軌風控：-8% 移動停利停損 + -30% 戰術硬停損)
 功能：
 1. 讀取 portfolio.json 個人持股 (股數、買進成本、進場日期)
-2. 比對現價、50MA 生命線、波段最高價回檔
-3. 產生 8% 移動停利停損警報與 LINE 推播文案
+2. 比對現價、50MA 生命線、波段最高價回檔 (8%) 與買進成本絕對虧損 (30%)
+3. 產生雙軌停損警報與 LINE 推播文案
 4. 輸出網頁端個人資產卡片 HTML
 """
 import os
@@ -93,7 +93,6 @@ class PortfolioTracker:
         except Exception as e:
             print(f"[警告] 寫入本地 portfolio.json 失敗: {e}")
 
-        # 雲端 Webhook 同步 (選用，例如 Google Apps Script 或 自建 API)
         webhook_url = os.getenv("PORTFOLIO_WEBHOOK_URL", "").strip()
         if webhook_url:
             try:
@@ -115,6 +114,7 @@ class PortfolioTracker:
         風控規則：
         1. 跌破 50MA：中期生命線跌破，趨勢轉弱。
         2. 自買進後波段高點回檔 >= 8%：觸發移動停利/停損。
+        3. 自買進成本累積虧損 >= 30%：觸發戰術絕對硬停損 (Hard Stop-Loss)。
         """
         positions = cls.load_portfolio()
         if not positions:
@@ -160,12 +160,18 @@ class PortfolioTracker:
             unrealized_pnl = market_val - cost_val
             return_pct = ((curr_price - cost_price) / cost_price * 100) if cost_price > 0 else 0.0
 
+            # 30% 戰術絕對硬停損
+            hard_stop_triggered = (return_pct <= -30.0)
+
             # 警報判斷
             alerts = []
+            if hard_stop_triggered:
+                alerts.append("🔴 觸發-30%戰術絕對硬停損")
+            elif trailing_stop_triggered:
+                alerts.append(f"高點回檔已達 {abs(drawdown_from_peak):.1f}% (滿8%停損)")
+
             if not is_above_50ma:
                 alerts.append("跌破50MA生命線")
-            if trailing_stop_triggered:
-                alerts.append(f"高點回檔已達 {abs(drawdown_from_peak):.1f}% (滿8%停利停損)")
 
             has_alert = len(alerts) > 0
             alert_text = " + ".join(alerts) if has_alert else "多頭軌道安全"
@@ -186,6 +192,7 @@ class PortfolioTracker:
                 "sma50": sma50,
                 "is_above_50ma": is_above_50ma,
                 "trailing_stop_triggered": trailing_stop_triggered,
+                "hard_stop_triggered": hard_stop_triggered,
                 "has_alert": has_alert,
                 "alert_text": alert_text
             })
@@ -214,7 +221,7 @@ class PortfolioTracker:
                 lines.append(f"  └ 警報原因: {p['alert_text']}")
                 lines.append(f"  └ 建議動作: 請開啟大戶投/複委託考慮減碼或平倉！")
         else:
-            lines.append("✅ 目前持有標的均處於安全多頭軌道，未觸發 8% 回檔與 50MA 跌破，可穩定續抱。")
+            lines.append("✅ 目前持有標的均處於安全多頭軌道，未觸發 8% 回檔、30% 硬停損與 50MA 跌破，可穩定續抱。")
 
         lines.append("")
         return "\n".join(lines)
@@ -238,14 +245,12 @@ class PortfolioTracker:
             ret_color = "#34d399" if ret_pct >= 0 else "#f87171"
             pnl_val = p.get("unrealized_pnl", 0.0)
             
-            # 美股未實現損益金額保留小數點後兩位 (例如 +$13.14 / -$11.65)，台股維持整數顯示 (例如 +NT$5,000 / -NT$5,000)
             pnl_sign = "+" if pnl_val >= 0 else "-"
             if is_tw:
                 pnl_str = f"({pnl_sign}NT${abs(pnl_val):,.0f})"
             else:
                 pnl_str = f"({pnl_sign}${abs(pnl_val):,.2f})"
             
-            # 股數格式化：整數顯示 int，非整數顯示有效位數 :g
             shares_val = p.get("shares", 0)
             shares_str = f"{int(shares_val)}" if float(shares_val).is_integer() else f"{shares_val:g}"
 
@@ -263,7 +268,7 @@ class PortfolioTracker:
                     {'+' if ret_pct >= 0 else ''}{ret_pct:.2f}%<br>
                     <span style="font-size:11px; opacity:0.85;">{pnl_str}</span>
                 </td>
-                <td class="text-right font-mono desktop-only" style="color: {'#f87171' if p['drawdown_from_peak'] <= -8 else '#94a3b8'};">
+                <td class="text-right font-mono desktop-only" style="color: {'#f87171' if p['drawdown_from_peak'] <= -8 or p['hard_stop_triggered'] else '#94a3b8'};">
                     {p['drawdown_from_peak']:.1f}%
                 </td>
                 <td class="text-center">{badge_html}</td>
