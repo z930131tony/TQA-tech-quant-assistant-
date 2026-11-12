@@ -194,7 +194,8 @@ class PortfolioTracker:
                 "trailing_stop_triggered": trailing_stop_triggered,
                 "hard_stop_triggered": hard_stop_triggered,
                 "has_alert": has_alert,
-                "alert_text": alert_text
+                "alert_text": alert_text,
+                "data_date": df.index[-1].strftime("%Y-%m-%d")
             })
 
         return evaluated

@@ -52,6 +52,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python run_daily.py --market ${{ github.event.inputs.market || 'AUTO' }}
+          python generate_web.py || true
 
       - name: 提交更新後的檔案至 main 分支
         run: |
