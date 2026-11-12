@@ -514,10 +514,13 @@ class TechBacktester:
         spread = top_avg - bot_avg
         is_pass = spread > 0.0
 
+        spread_wins = sum(1 for t, b in zip(top_returns, bot_returns) if t > b)
+        spread_win_rate = (spread_wins / len(top_returns) * 100.0) if top_returns else 0.0
+
         msg = (
-            f"截面動能分位數檢驗通過: Top分位數未來5日均報 ({top_avg:+.2f}%) "
-            f"顯著超越 Bottom分位數 ({bot_avg:+.2f}%)，多空利差 Spread={spread:+.2f}% "
-            f"(抽樣 {len(top_returns)} 期，共 {len(rows)} 檔標的)。"
+            f"截面動能分位數檢驗通過: 共載入 {len(rows)} 檔標的 (總K棒數: {len(all_bars):,} 筆)，"
+            f"Top分位數未來5日均報 ({top_avg:+.2f}%) 顯著超越 Bottom分位數 ({bot_avg:+.2f}%)，"
+            f"多空利差 Spread={spread:+.2f}%，動能勝率={spread_win_rate:.1f}% (抽樣 {len(top_returns)} 期)。"
         ) if is_pass else f"截面動能分位數檢驗未通過 (Spread={spread:+.2f}%)。"
 
         return {
@@ -529,6 +532,7 @@ class TechBacktester:
             "top_quantile_mean_ret": round(top_avg, 2),
             "bottom_quantile_mean_ret": round(bot_avg, 2),
             "quantile_spread": round(spread, 2),
+            "spread_win_rate_pct": round(spread_win_rate, 2),
             "rebalance_periods_sampled": len(top_returns),
             "message": msg
         }

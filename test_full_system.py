@@ -227,18 +227,22 @@ try:
         has_numba_kd = ("k_9" in feats.columns and "d_9" in feats.columns)
         has_vol_mom = ("vol_adjusted_momentum" in feats.columns and "vol_adj_roc_20" in feats.columns)
         has_volume_signals = ("is_shakeout_buy" in feats.columns and "is_distribution_warn" in feats.columns)
+        has_microstructure = all(c in feats.columns for c in ["ker_20", "vcp_ratio", "is_vcp_squeeze", "ud_vol_ratio"])
         
         kd_val = float(feats["k_9"].iloc[-1])
         vol_mom_val = float(feats["vol_adjusted_momentum"].iloc[-1])
         shakeout_count = int(feats["is_shakeout_buy"].sum())
         dist_count = int(feats["is_distribution_warn"].sum())
+        vcp_count = int(feats["is_vcp_squeeze"].sum())
+        ker_val = float(feats["ker_20"].iloc[-1])
 
         print(f"  ✅ Numba 加速 KD 計算: K={kd_val:.1f}, D={float(feats['d_9'].iloc[-1]):.1f}")
         print(f"  ✅ 夏普波動率調整動能: {vol_mom_val:.2f}")
         print(f"  ✅ 階梯縮量洗盤訊號 (is_shakeout_buy) 總計: {shakeout_count} 次")
         print(f"  ✅ 爆量出貨警訊 (is_distribution_warn) 總計: {dist_count} 次")
+        print(f"  ✅ VCP 波動率收斂壓縮 (is_vcp_squeeze) 總計: {vcp_count} 次，最新 KER: {ker_val:.2f}")
 
-        results["Numba量價特徵工程"] = (has_numba_kd and has_vol_mom and has_volume_signals)
+        results["Numba量價特徵工程"] = (has_numba_kd and has_vol_mom and has_volume_signals and has_microstructure)
     else:
         results["Numba量價特徵工程"] = False
 except Exception as e:

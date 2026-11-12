@@ -1,12 +1,14 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# 排除生成之靜態儀表板與數據快取，不計入 GitHub 語言統計 (讓專案正確識別為 100% Python)
+# 排除生成之靜態儀表板與大體積數據，不計入 GitHub 語言統計 (讓專案正確識別為 100% Python)
 index.html linguist-detectable=false
 index.html linguist-generated=true
-index.html linguist-vendored=true
+index.html linguist-vendored
 *.html linguist-detectable=false
 *.html linguist-generated=true
-*.html linguist-vendored=true
+*.html linguist-vendored
 data_cache/* linguist-detectable=false
-data_cache/* linguist-vendored=true
+data_cache/* linguist-vendored
+*.csv linguist-detectable=false
+*.csv linguist-vendored
