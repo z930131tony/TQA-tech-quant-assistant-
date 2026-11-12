@@ -257,13 +257,17 @@ try:
     from src.ai_debate import conduct_single_debate, fetch_yahoo_news
     from src.trader import SHIOAJI_AVAILABLE
 
-    # 1. 測試在無 API Key 下，AI 辯論模組優雅降級為量化規則合成
+    # 1. 測試在無 API Key 下，AI 辯論模組優雅降級為量化規則合成 (含三大價量籌碼因子)
     fake_tech = {
         "price": 1050.0,
         "score": 85.0,
         "above_50sma": True,
         "is_shakeout_buy": True,
-        "is_distribution_warn": False
+        "is_distribution_warn": False,
+        "ker_20": 0.58,
+        "vcp_ratio": 0.72,
+        "is_vcp_squeeze": True,
+        "ud_vol_ratio": 1.35
     }
     debate_res = conduct_single_debate(
         ticker="2330.TW",
@@ -274,15 +278,18 @@ try:
         api_key=None
     )
     fallback_ok = (debate_res.get("verdict") == "STRONG_BUY" and debate_res.get("step_buy_10pct_price") == 945.0)
+    has_chip_metrics = "chip_metrics" in debate_res and debate_res["chip_metrics"].get("ker_20") == 0.58
+    has_chip_in_bull = any(k in debate_res.get("bull_summary", "") for k in ["趨勢效率", "洗盤", "VCP", "吃貨", "量能比"])
 
     # 2. 測試 Shioaji 動態導入 (不論環境有無安裝皆能安全運作)
     trader_obj = AutoTrader(dataset=dataset)
     shioaji_safe = hasattr(trader_obj, "execute_semi_auto_order") and hasattr(trader_obj, "sync_shioaji_positions")
 
     print(f"  ✅ AI 多空辯論引擎無 Key 降級保護: {fallback_ok} (Verdict: {debate_res.get('verdict')})")
+    print(f"  ✅ 語意化籌碼因子注入: {has_chip_metrics and has_chip_in_bull}")
     print(f"  ✅ 永豐 Shioaji 動態相容性 (本機安裝狀態: {SHIOAJI_AVAILABLE}): {shioaji_safe}")
 
-    results["AI辯論與Shioaji防護"] = (fallback_ok and shioaji_safe)
+    results["AI辯論與Shioaji防護"] = (fallback_ok and shioaji_safe and has_chip_metrics and has_chip_in_bull)
 except Exception as e:
     print(f"  ❌ AI 與下單相容測試異常: {e}")
     results["AI辯論與Shioaji防護"] = False
