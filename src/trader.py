@@ -303,7 +303,8 @@ class AutoTrader:
                     print(f"  ⚠️ CA 憑證啟用失敗 ({ca_err})，若為模擬環境可能不影響查詢。")
 
             # 抓取台股部位 (包含零股與整張)
-            positions = api.list_positions(api.stock_account, unit=sj.constant.Unit.Share)
+            unit_val = getattr(sj, "Unit", getattr(sj, "constant", None)).Share if hasattr(sj, "Unit") else sj.constant.Unit.Share
+            positions = api.list_positions(api.stock_account, unit=unit_val)
             if not positions:
                 print("  ℹ️ 永豐帳戶目前無庫存部位。")
                 return PortfolioTracker.load_portfolio()
@@ -410,14 +411,16 @@ class AutoTrader:
                         api = sj.Shioaji(simulation=sim)
                         api.login(api_key=os.getenv("SHIOAJI_API_KEY"), secret_key=os.getenv("SHIOAJI_SECRET_KEY"))
                         clean_sym = ticker.replace(".TW", "").replace(".TWO", "")
-                        contract = api.Contracts.Stocks[clean_sym]
+                        contracts_mgr = getattr(api, "contracts", getattr(api, "Contracts", None))
+                        contract = contracts_mgr.Stocks[clean_sym]
+                        order_lot_val = getattr(sj.constant.StockOrderLot, "IntradayOdd", getattr(sj, "StockOrderLot", None).IntradayOdd if hasattr(sj, "StockOrderLot") else sj.constant.StockOrderLot.IntradayOdd)
                         order = api.Order(
                             price=price,
                             quantity=shares,
                             action=sj.constant.Action.Buy,
                             price_type=sj.constant.StockPriceType.LMT,
                             order_type=sj.constant.OrderType.ROD,
-                            order_lot=sj.constant.StockOrderLot.IntradayOdd
+                            order_lot=order_lot_val
                         )
                         trade = api.place_order(contract, order)
                         order_record["trade_id"] = str(getattr(trade, "order", {}).get("id", "SIM-1"))
