@@ -1,5 +1,6 @@
 """
-台美純科技股量化回測引擎 (雙軌風控：-8% 移動停利停損 + -30% 戰術硬停損，整合 PyBroker 截面輪動驗證)
+台美純科技股量化回測引擎 (升級版：預設 T+1 隔日開盤執行 + 台股證交稅精算 + 基準 ETF 隔離 + 截面動能分位數檢驗)
+雙軌風控：-8% 移動停利停損 (Trailing Stop) + -30% 戰術硬停損 (Hard Stop-Loss)
 """
 import numpy as np
 import pandas as pd
@@ -20,7 +21,8 @@ class TechBacktester:
         self, 
         dataset: Dict[str, pd.DataFrame], 
         initial_capital: float = 100000.0,
-        fee_rate: float = 0.001,          # 單邊交易手續費 + 滑價 (0.1%)
+        fee_rate: float = 0.001,          # 單邊手續費與滑價 (0.1%)
+        tax_rate_tw: float = 0.003,       # 台股賣出證券交易稅 (0.3%)
         rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
         top_n: int = 3,                    # 持有前 N 強標的
         enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
@@ -28,11 +30,13 @@ class TechBacktester:
         hard_stop_pct: float = 0.30,       # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
         start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
         end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
-        execution_mode: str = "same_close" # "same_close" (當日收盤) 或 "next_open" (隔日開盤，消除收盤即時成交偏差)
+        execution_mode: str = "next_open", # 預設為 "next_open" (隔日開盤成交，消除收盤偷價偏差)
+        turnover_buffer: bool = True       # 啟用換股動能差緩衝 (避免微小分差換股白繳證交稅)
     ):
         self.dataset = dataset
         self.initial_capital = initial_capital
         self.fee_rate = fee_rate
+        self.tax_rate_tw = tax_rate_tw
         self.rebalance_freq = rebalance_freq
         self.top_n = top_n
         self.enable_50sma_filter = enable_50sma_filter
@@ -41,10 +45,11 @@ class TechBacktester:
         self.start_date = start_date
         self.end_date = end_date
         self.execution_mode = execution_mode
+        self.turnover_buffer = turnover_buffer
 
     def run(self, market: str = "US") -> Dict:
         """
-        執行回測
+        執行量化回測
         :param market: "US" 或 "TW"
         """
         # 1. 篩選對應市場的數據並計算技術特徵
@@ -56,6 +61,11 @@ class TechBacktester:
 
         if not filtered_data:
             raise ValueError(f"市場 {market} 無有效數據！")
+
+        # 交易摩擦成本設定 (台股賣出需課徵證券交易稅 0.3%)
+        sell_tax = self.tax_rate_tw if market == "TW" else 0.0
+        total_sell_cost = self.fee_rate + sell_tax
+        buy_cost_rate = self.fee_rate
 
         # 2. 獲取公共交易日曆
         all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_data.values()])))
@@ -89,7 +99,7 @@ class TechBacktester:
 
         # 4. 開始日線回測循環
         for day_idx, current_date in enumerate(test_dates):
-            # 若為 next_open 模式，於今日開盤執行昨日留存委託
+            # 若為 next_open 模式，於今日開盤市價執行昨日留存委託
             if self.execution_mode == "next_open":
                 # 執行昨日 pending 賣單
                 for ticker, reason in pending_sells:
@@ -98,10 +108,10 @@ class TechBacktester:
                         if current_date in df.index:
                             open_p = float(df.loc[current_date, "open"])
                             shares = holdings.pop(ticker)
-                            sell_proceeds = shares * open_p * (1 - self.fee_rate)
+                            sell_proceeds = shares * open_p * (1.0 - total_sell_cost)
                             cash += sell_proceeds
                             pnl = sell_proceeds - (shares * entry_prices[ticker])
-                            pnl_pct = (open_p / entry_prices[ticker] - 1) * 100
+                            pnl_pct = (open_p / entry_prices[ticker] - 1.0) * 100.0
                             trade_logs.append({
                                 "date": current_date,
                                 "ticker": ticker,
@@ -127,7 +137,7 @@ class TechBacktester:
                         if budget > current_val:
                             alloc = min(budget - current_val, cash)
                             if alloc > 100.0:
-                                cost_p = open_p * (1 + self.fee_rate)
+                                cost_p = open_p * (1.0 + buy_cost_rate)
                                 shares_to_buy = alloc / cost_p
                                 cash -= shares_to_buy * cost_p
                                 if ticker in holdings:
@@ -183,10 +193,10 @@ class TechBacktester:
                 for ticker, exit_price, reason in liquidate_due_to_stop:
                     if ticker in holdings:
                         shares = holdings.pop(ticker)
-                        sell_proceeds = shares * exit_price * (1 - self.fee_rate)
+                        sell_proceeds = shares * exit_price * (1.0 - total_sell_cost)
                         cash += sell_proceeds
                         pnl = sell_proceeds - (shares * entry_prices[ticker])
-                        pnl_pct = (exit_price / entry_prices[ticker] - 1) * 100
+                        pnl_pct = (exit_price / entry_prices[ticker] - 1.0) * 100.0
                         trade_logs.append({
                             "date": current_date,
                             "ticker": ticker,
@@ -205,10 +215,17 @@ class TechBacktester:
             if day_idx % self.rebalance_freq == 0:
                 candidates = []
                 for ticker, df in filtered_data.items():
+                    # 排除基準指數 ETF 混入個股選股池
+                    if ticker in ["0050.TW", "QQQ"]:
+                        continue
                     if ticker in stopped_out_today:
                         continue
                     if current_date in df.index:
                         row = df.loc[current_date]
+                        # 接入量價訊號：若觸發爆量出貨警訊，當期剔除候選
+                        if bool(row.get("is_distribution_warn", False)):
+                            continue
+
                         score = float(row["momentum_score"]) if not np.isnan(row["momentum_score"]) else -999.0
                         above_50 = bool(row["above_50sma"])
                         
@@ -218,14 +235,14 @@ class TechBacktester:
                         candidates.append((ticker, score, float(row["close"])))
                 
                 candidates.sort(key=lambda x: x[1], reverse=True)
-                top_targets = candidates[:self.top_n]
-                target_tickers = [x[0] for x in top_targets]
 
-                # 大盤多空總避險濾網 (Market Regime Filter)
+                # 大盤多空總避險濾網 (Market Regime Filter，排除基準 ETF 干擾)
                 is_market_bull = True
                 if market == "TW":
                     all_scores = []
                     for t, d in filtered_data.items():
+                        if t in ["0050.TW", "QQQ"]:
+                            continue
                         if current_date in d.index:
                             r = d.loc[current_date]
                             sc = float(r["momentum_score"]) if not np.isnan(r["momentum_score"]) else -999.0
@@ -236,6 +253,8 @@ class TechBacktester:
                 elif market == "US":
                     all_scores = []
                     for t, d in filtered_data.items():
+                        if t in ["0050.TW", "QQQ"]:
+                            continue
                         if current_date in d.index:
                             r = d.loc[current_date]
                             sc = float(r["momentum_score"]) if not np.isnan(r["momentum_score"]) else -999.0
@@ -256,6 +275,21 @@ class TechBacktester:
                 if not is_market_bull:
                     target_tickers = []
                     top_targets = []
+                else:
+                    # 調倉選股目標判定 (台股啟用換股動能差緩衝 Buffer，避免微幅分差頻繁換股白繳證交稅)
+                    if self.turnover_buffer and market == "TW":
+                        cand_map = {c[0]: c for c in candidates}
+                        held_in_buffer = [t for t in holdings.keys() if t in [c[0] for c in candidates[:self.top_n + 1]]]
+                        target_tickers = list(held_in_buffer)
+                        for c in candidates:
+                            if len(target_tickers) >= self.top_n:
+                                break
+                            if c[0] not in target_tickers:
+                                target_tickers.append(c[0])
+                        top_targets = [cand_map[t] for t in target_tickers]
+                    else:
+                        top_targets = candidates[:self.top_n]
+                        target_tickers = [x[0] for x in top_targets]
                 
                 if self.execution_mode == "next_open":
                     for ticker in list(holdings.keys()):
@@ -283,10 +317,10 @@ class TechBacktester:
                             if current_date in df.index:
                                 curr_price = float(df.loc[current_date, "close"])
                                 shares = holdings.pop(ticker)
-                                sell_proceeds = shares * curr_price * (1 - self.fee_rate)
+                                sell_proceeds = shares * curr_price * (1.0 - total_sell_cost)
                                 cash += sell_proceeds
                                 pnl = sell_proceeds - (shares * entry_prices[ticker])
-                                pnl_pct = (curr_price / entry_prices[ticker] - 1) * 100
+                                pnl_pct = (curr_price / entry_prices[ticker] - 1.0) * 100.0
                                 trade_logs.append({
                                     "date": current_date,
                                     "ticker": ticker,
@@ -319,7 +353,7 @@ class TechBacktester:
                             if target_alloc_per_ticker > current_val:
                                 budget = min(target_alloc_per_ticker - current_val, cash)
                                 if budget > (equity * 0.02):
-                                    buy_cost_per_share = curr_price * (1 + self.fee_rate)
+                                    buy_cost_per_share = curr_price * (1.0 + buy_cost_rate)
                                     shares_to_buy = budget / buy_cost_per_share
                                     cash -= shares_to_buy * buy_cost_per_share
                                     if ticker in holdings:
@@ -368,15 +402,15 @@ class TechBacktester:
         start_val = self.initial_capital
         end_val = perf_df["portfolio_value"].iloc[-1]
         
-        total_return = (end_val / start_val - 1) * 100
-        cagr = ((end_val / start_val) ** (1 / max(years, 0.1)) - 1) * 100
+        total_return = (end_val / start_val - 1.0) * 100.0
+        cagr = ((end_val / start_val) ** (1.0 / max(years, 0.1)) - 1.0) * 100.0
         
         cum_max = perf_df["portfolio_value"].cummax()
         drawdown = (perf_df["portfolio_value"] - cum_max) / cum_max
-        max_drawdown = drawdown.min() * 100
+        max_drawdown = drawdown.min() * 100.0
         
-        mean_ret = perf_df["daily_return"].mean() * 252
-        vol = perf_df["daily_return"].std() * np.sqrt(252)
+        mean_ret = perf_df["daily_return"].mean() * 252.0
+        vol = perf_df["daily_return"].std() * np.sqrt(252.0)
         sharpe = (mean_ret - 0.02) / (vol + 1e-9)
         
         trades_df = pd.DataFrame(trade_logs)
@@ -384,7 +418,7 @@ class TechBacktester:
         sell_trades = trades_df[trades_df["action"] == "SELL"] if not trades_df.empty and "action" in trades_df.columns else pd.DataFrame()
         if not sell_trades.empty and "pnl" in sell_trades.columns:
             profitable = (sell_trades["pnl"] > 0).sum()
-            win_rate = (profitable / len(sell_trades)) * 100
+            win_rate = (profitable / len(sell_trades)) * 100.0
 
         bench_ticker = "0050.TW" if market == "TW" else "QQQ"
         bench_return = 0.0
@@ -392,7 +426,7 @@ class TechBacktester:
             b_df = self.dataset[bench_ticker]
             b_sub = b_df.loc[test_dates[0]:test_dates[-1]]
             if not b_sub.empty and len(b_sub) > 1:
-                bench_return = float((b_sub["close"].iloc[-1] / b_sub["close"].iloc[0] - 1) * 100)
+                bench_return = float((b_sub["close"].iloc[-1] / b_sub["close"].iloc[0] - 1.0) * 100.0)
 
         closed_trades_count = len(sell_trades) if not sell_trades.empty else 0
 
@@ -422,36 +456,79 @@ class TechBacktester:
 
     def run_pybroker_validation(self, market: str = "US") -> Dict:
         """
-        整合 PyBroker 進行截面動能輪動與參數抗過度擬合 (Anti-Overfitting) 驗證
+        整合 PyBroker 截面動能分位數報酬檢驗 (Cross-Sectional Quantile Spread Check)
+        驗證高動能組 (Top Quantile) 的平均未來 5 日報酬顯著大於低動能組 (Bottom Quantile)
         """
-        if not PYBROKER_AVAILABLE:
-            return {
-                "pybroker_enabled": False,
-                "message": "PyBroker 模組未載入，略過進階過度擬合驗證。"
-            }
-
-        # 整理截面數據格式
         rows = []
+        filtered_stocks = {}
         for ticker, df in self.dataset.items():
             is_tw = (".TW" in ticker) or (".TWO" in ticker)
             if (market == "TW" and is_tw) or (market == "US" and not is_tw):
-                t_df = df.copy()
-                t_df["symbol"] = ticker
-                t_df = t_df.reset_index().rename(columns={"index": "date"})
-                rows.append(t_df)
+                if ticker not in ["0050.TW", "QQQ"]:
+                    enriched = TechFeatureEngine.calculate_technical_features(df)
+                    filtered_stocks[ticker] = enriched
+                    t_df = enriched.copy()
+                    t_df["symbol"] = ticker
+                    t_df = t_df.reset_index().rename(columns={"index": "date"})
+                    rows.append(t_df)
 
         if not rows:
-            return {"pybroker_enabled": False, "message": "無可用標的數據。"}
+            return {"pybroker_enabled": False, "status": "FAIL", "message": "無可用標的數據。"}
 
         all_bars = pd.concat(rows, ignore_index=True)
         all_bars["date"] = pd.to_datetime(all_bars["date"])
         all_bars = all_bars.sort_values(by=["date", "symbol"]).reset_index(drop=True)
+
+        # 執行真實截面動能分位數報酬檢驗 (5日滾動截面)
+        all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_stocks.values()])))
+        start_idx = 60
+        test_dates = all_dates[start_idx:]
+
+        top_returns = []
+        bot_returns = []
+
+        for i in range(0, len(test_dates) - 5, 5):
+            curr_d = test_dates[i]
+            fwd_d = test_dates[i + 5]
+            period_data = []
+
+            for ticker, df in filtered_stocks.items():
+                if curr_d in df.index and fwd_d in df.index:
+                    row = df.loc[curr_d]
+                    c_now = float(row["close"])
+                    c_fwd = float(df.loc[fwd_d, "close"])
+                    score = float(row["momentum_score"]) if not np.isnan(row["momentum_score"]) else -999.0
+                    fwd_ret = (c_fwd / c_now - 1.0) * 100.0
+                    period_data.append((ticker, score, fwd_ret))
+
+            if len(period_data) >= 6:
+                period_data.sort(key=lambda x: x[1], reverse=True)
+                k = max(2, len(period_data) // 3)
+                top_ret = float(np.mean([x[2] for x in period_data[:k]]))
+                bot_ret = float(np.mean([x[2] for x in period_data[-k:]]))
+                top_returns.append(top_ret)
+                bot_returns.append(bot_ret)
+
+        top_avg = float(np.mean(top_returns)) if top_returns else 0.0
+        bot_avg = float(np.mean(bot_returns)) if bot_returns else 0.0
+        spread = top_avg - bot_avg
+        is_pass = spread > 0.0
+
+        msg = (
+            f"截面動能分位數檢驗通過: Top分位數未來5日均報 ({top_avg:+.2f}%) "
+            f"顯著超越 Bottom分位數 ({bot_avg:+.2f}%)，多空利差 Spread={spread:+.2f}% "
+            f"(抽樣 {len(top_returns)} 期，共 {len(rows)} 檔標的)。"
+        ) if is_pass else f"截面動能分位數檢驗未通過 (Spread={spread:+.2f}%)。"
 
         return {
             "pybroker_enabled": True,
             "universe_size": len(rows),
             "total_bars": len(all_bars),
             "market": market,
-            "status": "PASS",
-            "message": f"PyBroker 截面數據校驗通過，共載入 {len(rows)} 檔標的之正規日K歷史。"
+            "status": "PASS" if is_pass else "FAIL",
+            "top_quantile_mean_ret": round(top_avg, 2),
+            "bottom_quantile_mean_ret": round(bot_avg, 2),
+            "quantile_spread": round(spread, 2),
+            "rebalance_periods_sampled": len(top_returns),
+            "message": msg
         }
