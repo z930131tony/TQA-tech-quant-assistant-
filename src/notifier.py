@@ -48,7 +48,7 @@ class LineNotifier:
             return False
 
     @classmethod
-    def format_tw_morning_message(cls, rank_df: pd.DataFrame) -> str:
+    def format_tw_morning_message(cls, rank_df: pd.DataFrame, ai_debates: Optional[list] = None) -> str:
         """
         台股盤前操作指引 (08:30)
         """
@@ -98,13 +98,24 @@ class LineNotifier:
                 act = "買進/續抱" if row.get("above_50sma", False) else "觀望"
                 lines.append(f"{rank_idx}. {name}({ticker}) {price:,.1f} | 評分 {score:+.1f} | {act}")
 
+        # 若有 AI 多空辯論結果，納入 Top 3 一句話首席裁決
+        if ai_debates:
+            lines.append("\n--- 🤖 AI 多空對抗裁決 ---")
+            tw_debates = [d for d in ai_debates if d.get("is_tw", True)][:3]
+            for d in tw_debates:
+                sym = str(d.get("ticker", "")).replace(".TW", "").replace(".TWO", "")
+                nm = d.get("name", sym)
+                verdict = d.get("verdict", "CAUTIOUS_BUY")
+                act = d.get("tactical_action", "")
+                lines.append(f"• {nm}({sym}): 【{verdict}】{act}")
+
         lines.extend([
             "風控機制：跌破 50MA 或波段拉回 8% 執行出場。"
         ])
         return "\n".join(lines)
 
     @classmethod
-    def format_us_evening_message(cls, rank_df: pd.DataFrame) -> str:
+    def format_us_evening_message(cls, rank_df: pd.DataFrame, ai_debates: Optional[list] = None) -> str:
         """
         美股盤前操作指引 (21:00)
         """
@@ -163,6 +174,16 @@ class LineNotifier:
                 score = row.get("score", 0.0)
                 act = "買進/續抱" if row.get("above_50sma", False) else "觀望"
                 lines.append(f"{rank_idx}. {ticker} ${price:,.2f} | 評分 {score:+.1f} | {act}")
+
+        # 若有 AI 多空辯論結果，納入 Top 3 一句話首席裁決
+        if ai_debates:
+            lines.append("\n--- 🤖 AI 多空對抗裁決 ---")
+            us_debates = [d for d in ai_debates if not d.get("is_tw", False)][:3]
+            for d in us_debates:
+                sym = d.get("ticker", "")
+                verdict = d.get("verdict", "CAUTIOUS_BUY")
+                act = d.get("tactical_action", "")
+                lines.append(f"• {sym}: 【{verdict}】{act}")
 
         lines.extend([
             "風控機制：跌破 50MA 或高點拉回 8% 執行出場。"

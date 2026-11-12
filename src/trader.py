@@ -20,6 +20,13 @@ from src.portfolio import PortfolioTracker, PORTFOLIO_FILE
 
 load_dotenv()
 
+try:
+    import shioaji as sj
+    SHIOAJI_AVAILABLE = True
+except ImportError:
+    sj = None
+    SHIOAJI_AVAILABLE = False
+
 class AutoTrader:
     def __init__(
         self,
@@ -262,3 +269,167 @@ class AutoTrader:
         # 儲存回 portfolio.json
         PortfolioTracker.save_portfolio(kept_positions)
         return trade_logs, kept_positions
+
+    @classmethod
+    def sync_shioaji_positions(cls) -> List[Dict]:
+        """
+        透過永豐 Shioaji API 同步真實/模擬帳戶之台股零股/現貨持倉至 portfolio.json
+        """
+        if not SHIOAJI_AVAILABLE:
+            print("ℹ️ 本機環境未安裝 shioaji 套件，維持讀取本地 portfolio.json。")
+            return PortfolioTracker.load_portfolio()
+
+        api_key = os.getenv("SHIOAJI_API_KEY", "").strip()
+        secret_key = os.getenv("SHIOAJI_SECRET_KEY", "").strip()
+        if not api_key or not secret_key:
+            print("ℹ️ 未設定 SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY，維持讀取本地 portfolio.json。")
+            return PortfolioTracker.load_portfolio()
+
+        simulation = os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
+        cert_path = os.getenv("SHIOAJI_CERT_PATH", "").strip()
+        cert_pass = os.getenv("SHIOAJI_CERT_PASSWORD", "").strip()
+        person_id = os.getenv("SHIOAJI_PERSON_ID", "").strip()
+
+        print(f"🔗 正在連線永豐金證券 Shioaji API (模擬模式: {simulation})...")
+        try:
+            api = sj.Shioaji(simulation=simulation)
+            api.login(api_key=api_key, secret_key=secret_key)
+
+            if cert_path and os.path.exists(cert_path) and cert_pass and person_id:
+                try:
+                    api.activate_ca(ca_path=cert_path, ca_passwd=cert_pass, person_id=person_id)
+                    print("  🔑 CA 憑證啟用成功。")
+                except Exception as ca_err:
+                    print(f"  ⚠️ CA 憑證啟用失敗 ({ca_err})，若為模擬環境可能不影響查詢。")
+
+            # 抓取台股部位 (包含零股與整張)
+            positions = api.list_positions(api.stock_account, unit=sj.constant.Unit.Share)
+            if not positions:
+                print("  ℹ️ 永豐帳戶目前無庫存部位。")
+                return PortfolioTracker.load_portfolio()
+
+            synced_positions = []
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            for p in positions:
+                code = str(getattr(p, "code", "")).strip()
+                if not code:
+                    continue
+                sym = f"{code}.TW" if not code.endswith(".TW") and not code.endswith(".TWO") else code
+                qty = int(getattr(p, "quantity", 0))
+                price = float(getattr(p, "price", 0.0))
+                if qty > 0:
+                    synced_positions.append({
+                        "ticker": sym,
+                        "shares": qty,
+                        "cost_price": round(price, 2),
+                        "entry_date": today_str
+                    })
+
+            # 合併非台股部位 (保留美股部位)
+            existing = PortfolioTracker.load_portfolio()
+            us_positions = [pos for pos in existing if not (".TW" in pos.get("ticker", "") or ".TWO" in pos.get("ticker", ""))]
+            final_portfolio = synced_positions + us_positions
+
+            PortfolioTracker.save_portfolio(final_portfolio)
+            print(f"  ✅ 成功從永豐 Shioaji 同步 {len(synced_positions)} 檔台股部位至 portfolio.json。")
+            return final_portfolio
+
+        except Exception as e:
+            print(f"⚠️ 永豐 Shioaji 連線或同步異常: {e}，維持現有部位檔案。")
+            return PortfolioTracker.load_portfolio()
+
+    def execute_semi_auto_order(
+        self,
+        signals: List[Dict],
+        default_budget: float = 3000.0,
+        interactive: bool = True
+    ) -> List[Dict]:
+        """
+        永豐大戶投零股半自動委託確認與下單：
+        1. 計算單檔零股股數、手續費安全緩衝與風控關鍵位
+        2. 終端機格式化輸出委託確認卡片
+        3. 要求使用者手動輸入 'CONFIRM' 始送出委託 (安全防呆鎖)
+        """
+        executed_orders = []
+        if not signals:
+            print("ℹ️ 今日無新的買進委託訊號。")
+            return executed_orders
+
+        print("\n" + "=" * 65)
+        print("📋 【永豐大戶投】零股委託掛單確認 (Semi-Auto Order Confirmation)")
+        print("=" * 65)
+
+        for sig in signals:
+            ticker = sig.get("ticker", "")
+            name = TECH_UNIVERSE_TW.get(ticker, sig.get("name", ticker))
+            price = float(sig.get("price", 0.0))
+            if price <= 0:
+                continue
+
+            # 零股股數計算 (含 0.1425% 手續費與滑點安全緩衝)
+            shares = max(1, int(default_budget / (price * 1.0028)))
+            est_cost = shares * price
+            est_fee = max(1.0, round(est_cost * 0.001425, 1))
+            total_est = est_cost + est_fee
+
+            step_price = round(price * 0.90, 1)      # -10% 階梯加碼位
+            stop_price = round(price * 0.92, 1)      # -8% 移動停損位
+            hard_stop = round(price * 0.70, 1)       # -30% 戰術硬停損位
+
+            print(f"\n標的名稱: {name} ({ticker})")
+            print(f"  • 當前市價: NT$ {price:,.2f}")
+            print(f"  • 單檔預算: NT$ {default_budget:,.0f}")
+            print(f"  • 建議股數: {shares} 股 (預估金額: NT$ {est_cost:,.0f} + 手續費約 NT$ {est_fee:,.0f} = NT$ {total_est:,.0f})")
+            print(f"  • 🛡️ 風控參考價位:")
+            print(f"      -10% 階梯佈局價: NT$ {step_price:,.1f}")
+            print(f"      -8%  移動停利停損: NT$ {stop_price:,.1f}")
+            print(f"      -30% 戰術硬停損位: NT$ {hard_stop:,.1f}")
+
+            user_action = "CONFIRM"
+            if interactive:
+                prompt_msg = f"  👉 是否送出【{name} ({ticker})】{shares} 股買進委託？輸入 'CONFIRM' 確認，其餘任意鍵跳過: "
+                try:
+                    user_action = input(prompt_msg).strip()
+                except (EOFError, KeyboardInterrupt):
+                    user_action = "SKIP"
+
+            if user_action == "CONFIRM":
+                order_record = {
+                    "ticker": ticker,
+                    "name": name,
+                    "shares": shares,
+                    "price": price,
+                    "status": "SUBMITTED",
+                    "time": datetime.now(self.tw_tz).strftime("%Y-%m-%d %H:%M:%S")
+                }
+
+                # 若具備 Shioaji 則可送出模擬/實盤掛單
+                if SHIOAJI_AVAILABLE and os.getenv("SHIOAJI_API_KEY"):
+                    try:
+                        sim = os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
+                        api = sj.Shioaji(simulation=sim)
+                        api.login(api_key=os.getenv("SHIOAJI_API_KEY"), secret_key=os.getenv("SHIOAJI_SECRET_KEY"))
+                        clean_sym = ticker.replace(".TW", "").replace(".TWO", "")
+                        contract = api.Contracts.Stocks[clean_sym]
+                        order = api.Order(
+                            price=price,
+                            quantity=shares,
+                            action=sj.constant.Action.Buy,
+                            price_type=sj.constant.StockPriceType.LMT,
+                            order_type=sj.constant.OrderType.ROD,
+                            order_lot=sj.constant.StockOrderLot.IntradayOdd
+                        )
+                        trade = api.place_order(contract, order)
+                        order_record["trade_id"] = str(getattr(trade, "order", {}).get("id", "SIM-1"))
+                        print(f"  🚀 【下單成功】已送出永豐零股委託: {name} {shares} 股 @ NT${price:,.2f}")
+                    except Exception as order_err:
+                        print(f"  ⚠️ Shioaji 下單異常: {order_err}，轉為本地紀錄。")
+                else:
+                    print(f"  💡 【模擬確認】已記錄模擬買進委託: {name} {shares} 股 @ NT${price:,.2f}")
+
+                executed_orders.append(order_record)
+            else:
+                print(f"  ⏸️ 使用者取消【{name}】委託。")
+
+        print("=" * 65 + "\n")
+        return executed_orders

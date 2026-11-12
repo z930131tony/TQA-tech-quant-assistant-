@@ -49,6 +49,7 @@ jobs:
           PORTFOLIO_SHEET_URL: ${{ secrets.PORTFOLIO_SHEET_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python run_daily.py --market ${{ github.event.inputs.market || 'AUTO' }}
 

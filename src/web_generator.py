@@ -257,6 +257,16 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         <div>__TW_RECOMMENDATIONS__</div>
                     </div>
 
+                    <!-- 🤖 TradingAgents AI 多空對抗戰情室 -->
+                    <div class="card" style="border: 1px solid #3b82f6; background: linear-gradient(180deg, #131b2e 0%, #0f172a 100%);">
+                        <div class="card-header">
+                            <span class="card-title" style="color: #60a5fa;">🤖 AI 多空對抗戰情室</span>
+                            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6;">Gemini 2.5 Flash</span>
+                        </div>
+                        <div class="data-date">多頭動能狙擊手 vs 空頭風控審計官 ⚔️ 首席量化裁決</div>
+                        __TW_AI_DEBATE__
+                    </div>
+
                     <div class="card">
                         <div class="card-title" style="margin-bottom: 10px;">歷史回測績效 (2024 - 2026)</div>
                         <div class="grid-4">
@@ -325,9 +335,16 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             <!-- 個人持股風控監控 (全寬卡片，一覽無遺) -->
             <div class="card" style="margin-top: 4px;">
                 <div class="card-header">
-                    <span class="card-title">💼 我的台股庫存與風控 (8%停利停損 / 50MA生命線)</span>
+                    <span class="card-title">💼 我的台股庫存與永豐零股風控精算 (8%停損 / -30%硬停損 / 50MA生命線)</span>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="exportPortfolioJson()" style="background: #182238; border: 1px solid #334155; color: #38bdf8; font-size: 11px; padding: 4px 8px; border-radius: 5px; cursor: pointer;">📤 匯出 JSON</button>
+                        <label style="background: #182238; border: 1px solid #334155; color: #34d399; font-size: 11px; padding: 4px 8px; border-radius: 5px; cursor: pointer;">
+                            📥 匯入 JSON
+                            <input type="file" id="import-portfolio-file" accept=".json" onchange="importPortfolioJson(event)" style="display: none;">
+                        </label>
+                    </div>
                 </div>
-                <div class="data-date">自動比對買進成本、波段最高價回檔與生命線支撐</div>
+                <div class="data-date">即時連動永豐大戶投零股手續費估算、-10% 階梯進場價與 -30% 戰術硬停損</div>
                 __TW_PORTFOLIO__
             </div>
         </div>
@@ -352,6 +369,16 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             </div>
                         </div>
                         <div>__US_RECOMMENDATIONS__</div>
+                    </div>
+
+                    <!-- 🤖 TradingAgents AI 多空對抗戰情室 -->
+                    <div class="card" style="border: 1px solid #3b82f6; background: linear-gradient(180deg, #131b2e 0%, #0f172a 100%);">
+                        <div class="card-header">
+                            <span class="card-title" style="color: #60a5fa;">🤖 AI 多空對抗戰情室</span>
+                            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6;">Gemini 2.5 Flash</span>
+                        </div>
+                        <div class="data-date">多頭動能狙擊手 vs 空頭風控審計官 ⚔️ 首席量化裁決</div>
+                        __US_AI_DEBATE__
                     </div>
 
                     <div class="card">
@@ -422,9 +449,16 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             <!-- 個人持股風控監控 (全寬卡片，一覽無遺) -->
             <div class="card" style="margin-top: 4px;">
                 <div class="card-header">
-                    <span class="card-title">💼 我的美股庫存與風控 (8%停利停損 / 50MA生命線)</span>
+                    <span class="card-title">💼 我的美股庫存與風控精算 (8%停利停損 / -30%硬停損 / 50MA生命線)</span>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="exportPortfolioJson()" style="background: #182238; border: 1px solid #334155; color: #38bdf8; font-size: 11px; padding: 4px 8px; border-radius: 5px; cursor: pointer;">📤 匯出 JSON</button>
+                        <label style="background: #182238; border: 1px solid #334155; color: #34d399; font-size: 11px; padding: 4px 8px; border-radius: 5px; cursor: pointer;">
+                            📥 匯入 JSON
+                            <input type="file" id="import-portfolio-file-us" accept=".json" onchange="importPortfolioJson(event)" style="display: none;">
+                        </label>
+                    </div>
                 </div>
-                <div class="data-date">自動比對買進成本、波段最高價回檔與生命線支撐</div>
+                <div class="data-date">即時比對買進成本、波段最高價回檔、-30% 戰術硬停損與生命線支撐</div>
                 __US_PORTFOLIO__
             </div>
         </div>
@@ -1018,6 +1052,49 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             });
         }
 
+        // ================= 持倉 JSON 匯出與匯入功能 =================
+        function exportPortfolioJson() {
+            let dataToExport = null;
+            try {
+                const raw = localStorage.getItem('tqa_custom_portfolio');
+                if (raw) dataToExport = JSON.parse(raw);
+            } catch(e) {}
+            if (!dataToExport) {
+                dataToExport = [
+                    {"ticker": "2330.TW", "shares": 100, "cost_price": 1050.0, "entry_date": "2026-10-01"},
+                    {"ticker": "NVDA", "shares": 10, "cost_price": 135.5, "entry_date": "2026-10-15"}
+                ];
+            }
+            const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'portfolio.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function importPortfolioJson(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (Array.isArray(parsed)) {
+                        localStorage.setItem('tqa_custom_portfolio', JSON.stringify(parsed));
+                        alert('✅ 成功匯入 ' + parsed.length + ' 筆持倉資料！重新整理即可套用最新持股。');
+                        window.location.reload();
+                    } else {
+                        alert('⚠️ 匯入失敗：JSON 格式必須為陣列物件！');
+                    }
+                } catch (err) {
+                    alert('⚠️ 解析 JSON 失敗：' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
         // 頁面載入時初始化台股淨值圖與預算試算
         window.addEventListener('DOMContentLoaded', () => {
             twEquityChart = initEquityChart('tw-equity-chart', 'tw-equity-hud', EQUITY_CURVE_TW, true);
@@ -1253,6 +1330,8 @@ class WebDashboardGenerator:
         for p in filtered:
             is_tw = p.get("is_tw", False)
             prefix = "NT$" if is_tw else "$"
+            cost_p = float(p.get("cost_price", 0.0))
+            curr_p = float(p.get("curr_price", 0.0))
             ret_pct = p.get("return_pct", 0.0)
             ret_color = "#34d399" if ret_pct >= 0 else "#f87171"
             pnl_val = p.get("unrealized_pnl", 0.0)
@@ -1268,6 +1347,9 @@ class WebDashboardGenerator:
             shares_val = p.get("shares", 0)
             shares_str = f"{int(shares_val)}" if float(shares_val).is_integer() else f"{shares_val:g}"
 
+            step_buy_p = cost_p * 0.90
+            hard_stop_p = cost_p * 0.70
+
             badge_html = f'<span class="badge badge-bear" style="background:#450a0a; color:#f87171; border:1px solid #991b1b;">⚠️ {p.get("alert_text", "")}</span>' if p.get("has_alert") else '<span class="badge badge-bull">✅ 續抱中</span>'
             
             row = f"""
@@ -1275,9 +1357,12 @@ class WebDashboardGenerator:
                 <td>
                     <div style="font-weight:bold; color:#f1f5f9;">{p.get('name')}</div>
                     <div style="font-size:12px; color:#64748b; font-family:monospace;">{p.get('ticker')} ({shares_str} 股)</div>
+                    <div style="font-size:11px; color:#94a3b8; font-family:monospace; margin-top:2px;">
+                        -10%階梯: {prefix}{step_buy_p:,.1f} | -30%硬停損: <span style="color:#f87171;">{prefix}{hard_stop_p:,.1f}</span>
+                    </div>
                 </td>
-                <td class="text-right font-mono">{prefix}{p.get('cost_price', 0.0):,.2f}</td>
-                <td class="text-right font-mono" style="font-weight:bold;">{prefix}{p.get('curr_price', 0.0):,.2f}</td>
+                <td class="text-right font-mono">{prefix}{cost_p:,.2f}</td>
+                <td class="text-right font-mono" style="font-weight:bold;">{prefix}{curr_p:,.2f}</td>
                 <td class="text-right font-mono" style="color:{ret_color}; font-weight:bold;">
                     {'+' if ret_pct >= 0 else ''}{ret_pct:.2f}%<br>
                     <span style="font-size:11px; opacity:0.85;">{pnl_str}</span>
@@ -1310,6 +1395,94 @@ class WebDashboardGenerator:
         </div>
         """
         return table_html
+
+    @staticmethod
+    def build_ai_debate_html(debates: list, is_tw: bool) -> str:
+        """
+        生成 TradingAgents AI 多空對抗戰情卡片 HTML
+        """
+        filtered = [d for d in debates if d.get("is_tw", True) == is_tw]
+        if not filtered:
+            return """
+            <div style="background: #182238; border: 1px dashed #243049; border-radius: 10px; padding: 18px; text-align: center; color: #64748b; font-size: 13px;">
+                目前無可用的 AI 多空辯論資料。
+            </div>
+            """
+
+        verdict_styles = {
+            "STRONG_BUY": ("badge-bull", "🚀 強烈看多"),
+            "CAUTIOUS_BUY": ("us-pill", "⚡ 謹慎佈局"),
+            "CASH_DEFENSE": ("badge-bear", "🛡️ 現金防禦"),
+            "SELL": ("badge-bear", "🛑 停損減碼")
+        }
+
+        cards = []
+        for d in filtered:
+            ticker = d.get("ticker", "")
+            name = d.get("name", ticker)
+            price = float(d.get("price", 0.0))
+            verdict = d.get("verdict", "CAUTIOUS_BUY")
+            bull_sum = d.get("bull_summary", "動能結構完整，維持偏多思維。")
+            bear_sum = d.get("bear_summary", "留意高檔波動與技術面拉回風險。")
+            action = d.get("tactical_action", "採分批建倉，嚴格守好停損價位。")
+            step_p = float(d.get("step_buy_10pct_price", price * 0.90))
+            hard_stop_p = float(d.get("hard_stop_30pct_price", price * 0.70))
+            trail_stop_p = price * 0.92
+            is_ai = d.get("ai_powered", False)
+            prefix = "NT$" if is_tw else "$"
+
+            v_cls, v_txt = verdict_styles.get(verdict, ("badge-bull", f"⚖️ {verdict}"))
+            ai_tag = "✨ Gemini 2.5 Flash 深度裁決" if is_ai else "⚙️ 量化規則合成"
+
+            card_html = f"""
+            <div style="background: #182238; border: 1px solid #28354f; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+                    <div style="display: flex; align-items: baseline; gap: 8px;">
+                        <span style="font-weight: bold; font-size: 15px; color: #f8fafc; cursor: pointer;" onclick="openStockModal('{ticker}')">{name}</span>
+                        <span style="font-family: monospace; font-size: 13px; color: #94a3b8;">{ticker}</span>
+                        <span style="font-family: monospace; font-weight: bold; font-size: 14px; color: #cbd5e1; margin-left: 4px;">{prefix}{price:,.2f}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span class="badge {v_cls}">{v_txt}</span>
+                        <span style="font-size: 10px; color: #64748b; font-family: monospace;">{ai_tag}</span>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 10px;">
+                    <div style="background: rgba(6, 78, 59, 0.25); border-left: 3px solid #059669; padding: 7px 10px; border-radius: 0 6px 6px 0; font-size: 12px;">
+                        <span style="color: #34d399; font-weight: bold;">🐂 多頭狙擊手:</span>
+                        <span style="color: #cbd5e1; margin-left: 4px;">{bull_sum}</span>
+                    </div>
+                    <div style="background: rgba(69, 10, 10, 0.25); border-left: 3px solid #dc2626; padding: 7px 10px; border-radius: 0 6px 6px 0; font-size: 12px;">
+                        <span style="color: #f87171; font-weight: bold;">🐻 空頭審計官:</span>
+                        <span style="color: #cbd5e1; margin-left: 4px;">{bear_sum}</span>
+                    </div>
+                </div>
+
+                <div style="background: #111a2e; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 10px;">
+                    <div style="font-size: 11px; color: #38bdf8; font-weight: bold; margin-bottom: 3px;">
+                        ⚖️ 首席量化裁決:
+                    </div>
+                    <div style="font-size: 12px; color: #e2e8f0; line-height: 1.4; margin-bottom: 6px;">
+                        {action}
+                    </div>
+                    <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; font-family: monospace;">
+                        <span style="background: #1e293b; color: #93c5fd; padding: 2px 6px; border-radius: 4px; border: 1px solid #3b82f6;">
+                            🎯 -10%階梯價: {prefix}{step_p:,.1f}
+                        </span>
+                        <span style="background: #1e293b; color: #fca5a5; padding: 2px 6px; border-radius: 4px; border: 1px solid #ef4444;">
+                            🛡️ -8%移動停損: {prefix}{trail_stop_p:,.1f}
+                        </span>
+                        <span style="background: #1e293b; color: #f87171; padding: 2px 6px; border-radius: 4px; border: 1px solid #dc2626; font-weight: bold;">
+                            ⚠️ -30%硬停損: {prefix}{hard_stop_p:,.1f}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            """
+            cards.append(card_html)
+
+        return "".join(cards)
 
     @staticmethod
     def build_table_rows_html(df: pd.DataFrame, is_tw: bool) -> str:
@@ -1490,7 +1663,16 @@ class WebDashboardGenerator:
         return json.dumps(db, ensure_ascii=False)
 
     @classmethod
-    def generate_html(cls, dataset: Dict[str, pd.DataFrame], tw_rank: pd.DataFrame, us_rank: pd.DataFrame, tw_backtest: dict, us_backtest: dict, output_path: str):
+    def generate_html(
+        cls, 
+        dataset: Dict[str, pd.DataFrame], 
+        tw_rank: pd.DataFrame, 
+        us_rank: pd.DataFrame, 
+        tw_backtest: dict, 
+        us_backtest: dict, 
+        output_path: str,
+        ai_debate_data: Optional[Dict] = None
+    ):
         import pytz
         tw_tz = pytz.timezone("Asia/Taipei")
         now_str = datetime.now(tw_tz).strftime("%Y-%m-%d %H:%M")
@@ -1539,6 +1721,19 @@ class WebDashboardGenerator:
         tw_portfolio_html = cls.build_portfolio_html(portfolio_positions, "TW")
         us_portfolio_html = cls.build_portfolio_html(portfolio_positions, "US")
 
+        # 4.5 AI 多空對決戰情卡片 (TradingAgents)
+        if ai_debate_data is None:
+            try:
+                from src.ai_debate import run_daily_ai_debate
+                ai_debate_data = run_daily_ai_debate(tw_rank, us_rank, target_market="ALL", positions=portfolio_positions)
+            except Exception as ai_err:
+                print(f"ℹ️ AI 辯論載入跳過 ({ai_err})")
+                ai_debate_data = {"debates": []}
+
+        debates_list = ai_debate_data.get("debates", []) if ai_debate_data else []
+        tw_ai_debate_html = cls.build_ai_debate_html(debates_list, is_tw=True)
+        us_ai_debate_html = cls.build_ai_debate_html(debates_list, is_tw=False)
+
         # 5. 回測淨值曲線數據 (Area Chart vs Benchmark)
         tw_equity_curve = cls.build_equity_curve_data(tw_backtest.get("perf_df", pd.DataFrame()), dataset, "0050.TW")
         us_equity_curve = cls.build_equity_curve_data(us_backtest.get("perf_df", pd.DataFrame()), dataset, "QQQ")
@@ -1560,9 +1755,11 @@ class WebDashboardGenerator:
         html = html.replace("__TW_STATE_BADGE__", tw_state_badge)
         html = html.replace("__TW_STATE_TEXT__", tw_state_text)
         html = html.replace("__TW_RECOMMENDATIONS__", tw_recom_html)
+        html = html.replace("__TW_AI_DEBATE__", tw_ai_debate_html)
         html = html.replace("__US_STATE_BADGE__", us_state_badge)
         html = html.replace("__US_STATE_TEXT__", us_state_text)
         html = html.replace("__US_RECOMMENDATIONS__", us_recom_html)
+        html = html.replace("__US_AI_DEBATE__", us_ai_debate_html)
 
         html = html.replace("__TW_TOTAL_RET__", tw_tot)
         html = html.replace("__TW_CAGR__", tw_cagr)

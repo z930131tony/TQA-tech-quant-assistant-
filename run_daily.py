@@ -19,6 +19,7 @@ from src.trader import AutoTrader
 from src.web_generator import WebDashboardGenerator
 from src.notifier import LineNotifier
 from src.portfolio import PortfolioTracker
+from src.ai_debate import run_daily_ai_debate
 
 def get_auto_market() -> str:
     tw_tz = pytz.timezone("Asia/Taipei")
@@ -50,8 +51,14 @@ def main():
 
     # 2.5 執行自動模擬交易與風控比對 (依照目標市場單獨執行，避免時區錯置)
     print(f"📈 執行【{target_market}】自動模擬交易與部位風控...")
+    if target_market in ["ALL", "TW"]:
+        AutoTrader.sync_shioaji_positions()
     trader = AutoTrader(dataset=dataset)
     sim_logs, _ = trader.execute_daily_simulation(tw_rank, us_rank, target_market=target_market)
+
+    # 2.8 執行 TradingAgents AI 多空對抗辯論 (Top 3 + 庫存部位)
+    portfolio_positions = PortfolioTracker.evaluate_portfolio(dataset)
+    ai_debate_data = run_daily_ai_debate(tw_rank, us_rank, target_market=target_market, positions=portfolio_positions)
 
     # 3. 整理回測成績
     backtester = TechBacktester(dataset=dataset, initial_capital=100000.0)
@@ -66,19 +73,20 @@ def main():
         us_rank=us_rank,
         tw_backtest=tw_backtest,
         us_backtest=us_backtest,
-        output_path=output_html
+        output_path=output_html,
+        ai_debate_data=ai_debate_data
     )
 
     # 5. 發送 LINE 推播
     notifier = LineNotifier()
     print(f"發送【{target_market}】市場 LINE 推播...")
-    portfolio_positions = PortfolioTracker.evaluate_portfolio(dataset)
     portfolio_note = PortfolioTracker.format_line_notification(portfolio_positions, market_type=target_market)
+    debates_list = ai_debate_data.get("debates", [])
 
     if target_market == "TW":
-        msg = LineNotifier.format_tw_morning_message(tw_rank)
+        msg = LineNotifier.format_tw_morning_message(tw_rank, ai_debates=debates_list)
     else:
-        msg = LineNotifier.format_us_evening_message(us_rank)
+        msg = LineNotifier.format_us_evening_message(us_rank, ai_debates=debates_list)
 
     if sim_logs:
         sim_summary = "🎯 【模擬下單執行紀錄】\n" + "\n".join(sim_logs) + "\n\n"
