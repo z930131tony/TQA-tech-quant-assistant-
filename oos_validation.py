@@ -80,13 +80,19 @@ def check_feature_causality(dataset: dict, test_symbol: str = "2330.TW") -> bool
 
 def check_data_anomalies(dataset: dict, threshold_drop: float = -0.35) -> list:
     """
-    檢驗 2：掃描未還原除權息或分割異常 (Data Anomaly Scanner)
+    檢驗 2：全池數據品質檢驗 (Data Anomaly & Synchronization Scanner)
+    1. 掃描單日跌幅 > 35% 之未還原股票分割或除權異常
+    2. 檢查是否存在 volume <= 0 或 close <= 0 的幽靈 K 棒
+    3. 檢查同市場各股最後一筆日期是否與基準標的 (0050.TW / QQQ) 100% 同步
     """
     print("\n" + "=" * 75)
-    print("【檢驗 2】全股票池單日異常暴跌掃描 (防範未還原股票分割/除權問題)")
+    print("【檢驗 2】全股票池數據異常與橫截面日期同步檢驗")
     print("=" * 75)
 
     anomalies = []
+    
+    # 1. 拆股與暴跌異常掃描
+    split_anomalies = []
     for ticker, df in dataset.items():
         if df is None or df.empty or "close" not in df.columns:
             continue
@@ -94,14 +100,54 @@ def check_data_anomalies(dataset: dict, threshold_drop: float = -0.35) -> list:
         min_pct = pct.min()
         if min_pct <= threshold_drop:
             worst_date = pct.idxmin()
-            anomalies.append((ticker, str(worst_date)[:10], min_pct))
+            split_anomalies.append((ticker, str(worst_date)[:10], min_pct))
+            anomalies.append((ticker, "未還原拆股異常", str(worst_date)[:10], f"跌幅 {min_pct*100:.2f}%"))
 
+    # 2. 幽靈 K 棒 (volume <= 0 或 close <= 0) 掃描
+    zero_vol_anomalies = []
+    for ticker, df in dataset.items():
+        if df is None or df.empty:
+            continue
+        bad_mask = (df["volume"] <= 0) | (df["close"] <= 0)
+        if bad_mask.any():
+            bad_count = int(bad_mask.sum())
+            bad_date = str(df[bad_mask].index[-1])[:10]
+            zero_vol_anomalies.append((ticker, bad_count, bad_date))
+            anomalies.append((ticker, "零成交量幽靈K棒", bad_date, f"{bad_count} 筆"))
+
+    # 3. 橫截面最後日期同步校驗
+    date_sync_issues = []
+    # 台股基準日期
+    if "0050.TW" in dataset and dataset["0050.TW"] is not None and not dataset["0050.TW"].empty:
+        tw_bench_date = dataset["0050.TW"].index[-1].date()
+        for ticker, df in dataset.items():
+            if (".TW" in ticker or ".TWO" in ticker) and df is not None and not df.empty:
+                t_date = df.index[-1].date()
+                if t_date != tw_bench_date:
+                    date_sync_issues.append((ticker, str(t_date), str(tw_bench_date)))
+                    anomalies.append((ticker, "台股日期不同步", str(t_date), f"基準日期: {tw_bench_date}"))
+
+    # 美股基準日期
+    if "QQQ" in dataset and dataset["QQQ"] is not None and not dataset["QQQ"].empty:
+        us_bench_date = dataset["QQQ"].index[-1].date()
+        for ticker, df in dataset.items():
+            if not (".TW" in ticker or ".TWO" in ticker) and df is not None and not df.empty:
+                t_date = df.index[-1].date()
+                if t_date != us_bench_date:
+                    date_sync_issues.append((ticker, str(t_date), str(us_bench_date)))
+                    anomalies.append((ticker, "美股日期不同步", str(t_date), f"基準日期: {us_bench_date}"))
+
+    # 輸出檢驗結果
     if not anomalies:
-        print(f"✅ 全股票池共 {len(dataset)} 檔標的，均無單日跌幅 > {abs(threshold_drop)*100:.0f}% 之未還原分割異常。")
+        print(f"✅ 全股票池共 {len(dataset)} 檔標的數據品質全數通過：")
+        print(f"   - 拆股除權：0 檔單日跌幅 > {abs(threshold_drop)*100:.0f}% 異常")
+        print(f"   - 交易量能：0 筆 volume <= 0 或 close <= 0 幽靈 K 棒")
+        print(f"   - 橫截面對齊：台美股所有標的最後日 K 均與基準 (0050.TW / QQQ) 100% 同步")
     else:
-        print(f"⚠️ 發現 {len(anomalies)} 檔標的可能存在未還原拆股：")
-        for t, d, p in anomalies:
-            print(f"   - {t}: 於 {d} 單日跌幅達 {p*100:.2f}%")
+        print(f"⚠️ 發現 {len(anomalies)} 項數據異常需注意：")
+        for t, kind, d, detail in anomalies:
+            print(f"   - {t} [{kind}]: 日期 {d} ({detail})")
+            
     return anomalies
 
 
@@ -140,7 +186,7 @@ def run_institutional_oos_test(dataset: dict, split_date: str = "2025-06-30") ->
         mdd_expansion = (oos_mdd / is_mdd) if is_mdd > 0 else 1.0
 
         oos_alpha = float(oos_res["total_return"] - oos_res["benchmark_return"])
-        oos_trades = int(oos_res.get("total_trades", 0))
+        oos_trades = int(oos_res.get("closed_trades", oos_res.get("total_trades", 0)))
         win_rate = float(oos_res.get("win_rate_pct", 0.0))
 
         # 門檻檢驗判定
@@ -202,6 +248,25 @@ def run_multi_split_walk_forward(dataset: dict) -> bool:
             bench_str = f"{oos_res['benchmark_return']:+.1f}%"
             alpha_str = f"{alpha:+.1f}%"
             print(f"{sp:<14} {oos_res['total_trading_days']:<14} {ret_str:<14} {bench_str:<12} {alpha_str:<12} {oos_res['sharpe_ratio']:<10.2f} {status_str}")
+
+        # 獨立分段區間檢驗 (Non-overlapping Sub-periods: 如 2025-H1 與 2025-H2 ~ 2026)
+        print(f"\n  [獨立分段區間策略 vs 基準報酬對比]")
+        print(f"  {'分段區間名稱':<18} {'交易天數':<10} {'策略報酬':<12} {'基準報酬':<12} {'超額 Alpha':<12} {'夏普比':<10} {'狀態'}")
+        print("  " + "-" * 73)
+        sub_periods = [
+            ("2024-H2", "2024-07-01", "2024-12-31"),
+            ("2025-H1", "2025-01-01", "2025-06-30"),
+            ("2025-H2 ~ 2026", "2025-07-01", None)
+        ]
+        for p_name, p_start, p_end in sub_periods:
+            sub_res = TechBacktester(dataset, start_date=p_start, end_date=p_end).run(market)
+            sub_alpha = float(sub_res["total_return"] - sub_res["benchmark_return"])
+            sub_pass = (sub_alpha > 0.0)
+            sub_status = "✅ POSITIVE" if sub_pass else "⚠️ DEFENSIVE"
+            sub_ret_str = f"{sub_res['total_return']:+.1f}%"
+            sub_bench_str = f"{sub_res['benchmark_return']:+.1f}%"
+            sub_alpha_str = f"{sub_alpha:+.1f}%"
+            print(f"  {p_name:<16} {sub_res['total_trading_days']:<10} {sub_ret_str:<12} {sub_bench_str:<12} {sub_alpha_str:<12} {sub_res['sharpe_ratio']:<10.2f} {sub_status}")
 
     print("-" * 75)
     if all_positive_alpha:

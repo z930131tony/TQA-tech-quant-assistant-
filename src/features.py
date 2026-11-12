@@ -13,6 +13,14 @@ class TechFeatureEngine:
         計算技術指標：動能 (ROC)、均線濾網 (SMA)、突破線與波動度 (ATR)
         """
         data = df.copy()
+        # 強制過濾無效交易日 (volume <= 0 或 close <= 0) 並去重排序
+        if "volume" in data.columns and "close" in data.columns:
+            numeric_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in data.columns]
+            data[numeric_cols] = data[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            data = data.dropna(subset=["close", "volume"])
+            data = data[(data["volume"] > 0) & (data["close"] > 0)]
+        data = data[~data.index.duplicated(keep="last")].sort_index()
+
         close = data["close"]
         high = data["high"]
         low = data["low"]
@@ -86,8 +94,11 @@ class TechFeatureEngine:
         
         for ticker, df in dataset.items():
             enriched_df = cls.calculate_technical_features(df)
+            if enriched_df.empty:
+                continue
             latest = enriched_df.iloc[-1]
             latest_date_str = enriched_df.index[-1].strftime("%Y-%m-%d")
+            score_val = round(float(latest["momentum_score"]), 2) if not np.isnan(latest["momentum_score"]) else 0.0
             
             record = {
                 "ticker": ticker,
@@ -96,7 +107,8 @@ class TechFeatureEngine:
                 "price": round(float(latest["close"]), 2),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
-                "score": round(float(latest["momentum_score"]), 2) if not np.isnan(latest["momentum_score"]) else 0.0,
+                "score": score_val,
+                "composite_score": score_val,
                 "above_50sma": bool(latest["above_50sma"]),
                 "above_200sma": bool(latest["above_200sma"]),
                 "rsi": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,

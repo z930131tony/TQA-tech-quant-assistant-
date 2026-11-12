@@ -16,9 +16,64 @@ from src.config import TECH_UNIVERSE_TW, config
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portfolio.json")
 
 class PortfolioTracker:
-    @staticmethod
-    def load_portfolio(filepath: str = PORTFOLIO_FILE) -> List[Dict]:
-        """讀取個人持股設定檔"""
+    @classmethod
+    def load_portfolio(cls, filepath: str = PORTFOLIO_FILE) -> List[Dict]:
+        """
+        讀取個人持股設定檔
+        優先級：
+        1. Google Sheets CSV (環境變數 PORTFOLIO_SHEET_URL)
+        2. Supabase REST API (環境變數 SUPABASE_URL + SUPABASE_KEY)
+        3. 本地檔案 (portfolio.json)
+        """
+        # 1. Google Sheets 雲端試算表讀取 (手機端隨時開 App 修改)
+        sheet_url = os.getenv("PORTFOLIO_SHEET_URL", "").strip()
+        if sheet_url:
+            try:
+                df = pd.read_csv(sheet_url)
+                df.columns = [str(c).strip().lower() for c in df.columns]
+                if {"ticker", "shares", "cost_price"}.issubset(df.columns):
+                    df = df.dropna(subset=["ticker", "shares", "cost_price"])
+                    positions = []
+                    for _, row in df.iterrows():
+                        entry_val = ""
+                        if "entry_date" in row and not pd.isna(row["entry_date"]):
+                            entry_val = str(row["entry_date"]).strip()
+                        positions.append({
+                            "ticker": str(row["ticker"]).strip(),
+                            "shares": float(row["shares"]),
+                            "cost_price": float(row["cost_price"]),
+                            "entry_date": entry_val
+                        })
+                    if positions:
+                        return positions
+            except Exception as e:
+                print(f"[警告] 讀取 Google Sheets 雲端持倉失敗，切換回本地: {e}")
+
+        # 2. Supabase 雲端資料庫讀取
+        supabase_url = os.getenv("SUPABASE_URL", "").strip()
+        supabase_key = os.getenv("SUPABASE_KEY", "").strip()
+        if supabase_url and supabase_key:
+            try:
+                import urllib.request
+                endpoint = f"{supabase_url.rstrip('/')}/rest/v1/positions?select=*"
+                req = urllib.request.Request(endpoint, headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {supabase_key}"
+                })
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode("utf-8"))
+                        if isinstance(data, list) and len(data) > 0:
+                            return [{
+                                "ticker": str(r["ticker"]).strip(),
+                                "shares": float(r["shares"]),
+                                "cost_price": float(r["cost_price"]),
+                                "entry_date": str(r.get("entry_date", "")).strip() if r.get("entry_date") else ""
+                            } for r in data]
+            except Exception as e:
+                print(f"[警告] 讀取 Supabase 雲端持倉失敗，切換回本地: {e}")
+
+        # 3. 本地回退 (portfolio.json)
         if not os.path.exists(filepath):
             return []
         try:
@@ -29,11 +84,29 @@ class PortfolioTracker:
             print(f"[警告] 讀取 portfolio.json 失敗: {e}")
             return []
 
-    @staticmethod
-    def save_portfolio(positions: List[Dict], filepath: str = PORTFOLIO_FILE):
-        """儲存個人持股設定檔"""
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump({"positions": positions}, f, ensure_ascii=False, indent=2)
+    @classmethod
+    def save_portfolio(cls, positions: List[Dict], filepath: str = PORTFOLIO_FILE):
+        """儲存個人持股設定檔 (同時寫入本地快取，若有 Webhook 則同步雲端)"""
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump({"positions": positions}, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[警告] 寫入本地 portfolio.json 失敗: {e}")
+
+        # 雲端 Webhook 同步 (選用，例如 Google Apps Script 或 自建 API)
+        webhook_url = os.getenv("PORTFOLIO_WEBHOOK_URL", "").strip()
+        if webhook_url:
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    webhook_url,
+                    data=json.dumps({"positions": positions}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                print(f"[警告] 同步至雲端 Webhook 失敗: {e}")
 
     @classmethod
     def evaluate_portfolio(cls, dataset: Dict[str, pd.DataFrame]) -> List[Dict]:
@@ -70,17 +143,14 @@ class PortfolioTracker:
             sma50 = float(df["close"].rolling(50).mean().iloc[-1])
             is_above_50ma = curr_price >= sma50
 
-            # 計算買進之後的波段最高價
+            # 計算買進之後的波段最高價 (僅搜尋進場日隔天之後的最高價，避開進場日上影線誤判)
             if entry_date:
-                sub_df = df.loc[df.index >= pd.to_datetime(entry_date)]
-                if not sub_df.empty:
-                    peak_price = float(sub_df["high"].max())
-                else:
-                    peak_price = curr_price
+                sub_df = df.loc[df.index > pd.to_datetime(entry_date)]
+                post_entry_high = float(sub_df["high"].max()) if not sub_df.empty else cost_price
             else:
-                peak_price = float(df["high"].tail(60).max())
+                post_entry_high = float(df["high"].tail(60).max())
 
-            peak_price = max(peak_price, curr_price, cost_price)
+            peak_price = max(post_entry_high, curr_price, cost_price)
             drawdown_from_peak = ((curr_price - peak_price) / peak_price) * 100
             trailing_stop_triggered = (drawdown_from_peak <= -8.0)
 
@@ -156,29 +226,42 @@ class PortfolioTracker:
         if not filtered:
             return """
             <div style="background: #182238; border: 1px dashed #243049; border-radius: 10px; padding: 20px; text-align: center; color: #64748b;">
-                目前尚未設定自訂持股。可在 <code>portfolio.json</code> 新增您的庫存標的。
+                目前尚未設定自訂持股。可透過 Google Sheets 雲端試算表或 <code>portfolio.json</code> 新增您的庫存標的。
             </div>
             """
 
         rows = []
         for p in filtered:
-            prefix = "NT$" if p["is_tw"] else "$"
-            ret_color = "#34d399" if p["return_pct"] >= 0 else "#f87171"
-            pnl_sign = "+" if p["unrealized_pnl"] >= 0 else ""
+            is_tw = p.get("is_tw", False)
+            prefix = "NT$" if is_tw else "$"
+            ret_pct = p.get("return_pct", 0.0)
+            ret_color = "#34d399" if ret_pct >= 0 else "#f87171"
+            pnl_val = p.get("unrealized_pnl", 0.0)
             
+            # 美股未實現損益金額保留小數點後兩位 (例如 +$13.14 / -$11.65)，台股維持整數顯示 (例如 +NT$5,000 / -NT$5,000)
+            pnl_sign = "+" if pnl_val >= 0 else "-"
+            if is_tw:
+                pnl_str = f"({pnl_sign}NT${abs(pnl_val):,.0f})"
+            else:
+                pnl_str = f"({pnl_sign}${abs(pnl_val):,.2f})"
+            
+            # 股數格式化：整數顯示 int，非整數顯示有效位數 :g
+            shares_val = p.get("shares", 0)
+            shares_str = f"{int(shares_val)}" if float(shares_val).is_integer() else f"{shares_val:g}"
+
             badge_html = f'<span class="badge badge-bear" style="background:#450a0a; color:#f87171; border:1px solid #991b1b;">⚠️ {p["alert_text"]}</span>' if p["has_alert"] else '<span class="badge badge-bull">✅ 續抱中</span>'
             
             row = f"""
             <tr class="clickable" onclick="openStockModal('{p['ticker']}')">
                 <td>
                     <div style="font-weight:bold; color:#f1f5f9;">{p['name']}</div>
-                    <div style="font-size:12px; color:#64748b; font-family:monospace;">{p['ticker']} ({int(p['shares'])} 股)</div>
+                    <div style="font-size:12px; color:#64748b; font-family:monospace;">{p['ticker']} ({shares_str} 股)</div>
                 </td>
                 <td class="text-right font-mono">{prefix}{p['cost_price']:,.2f}</td>
                 <td class="text-right font-mono" style="font-weight:bold;">{prefix}{p['curr_price']:,.2f}</td>
                 <td class="text-right font-mono" style="color:{ret_color}; font-weight:bold;">
-                    {pnl_sign}{p['return_pct']:.2f}%<br>
-                    <span style="font-size:11px; opacity:0.85;">({prefix}{p['unrealized_pnl']:,.0f})</span>
+                    {'+' if ret_pct >= 0 else ''}{ret_pct:.2f}%<br>
+                    <span style="font-size:11px; opacity:0.85;">{pnl_str}</span>
                 </td>
                 <td class="text-right font-mono desktop-only" style="color: {'#f87171' if p['drawdown_from_peak'] <= -8 else '#94a3b8'};">
                     {p['drawdown_from_peak']:.1f}%

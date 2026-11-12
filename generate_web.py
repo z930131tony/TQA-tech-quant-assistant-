@@ -1,9 +1,10 @@
 """
-網頁生成一鍵啟動腳本 (生成 index.html 供手機與電腦瀏覽)
+網頁生成一鍵啟動腳本 (生成 index.html 供手機與電腦瀏覽，支援 --skip-data)
 """
 import sys
 import os
 import io
+import argparse
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
@@ -15,13 +16,17 @@ from src.backtester import TechBacktester
 from src.web_generator import WebDashboardGenerator
 
 def main():
+    parser = argparse.ArgumentParser(description="TQA 科技量化網頁生成器")
+    parser.add_argument("--skip-data", action="store_true", help="使用本機快取數據加速生成網頁 (免重複下載)")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("🌐 【TQA 科技量化網頁生成器】開始建立行動版網頁...")
     print("=" * 60)
 
-    # 1. 下載最新數據
+    # 1. 下載最新數據 (若指定 --skip-data 則直接讀取本機快取)
     loader = TechDataLoader()
-    dataset = loader.fetch_all_tech_data()
+    dataset = loader.fetch_all_tech_data(cache_only=args.skip_data)
 
     # 2. 特徵計算與即時天梯
     print("\n⚡ 正在評估最新台美動能評分...")
