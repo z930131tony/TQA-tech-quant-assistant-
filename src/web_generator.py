@@ -1209,29 +1209,35 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const setVal = (id, val) => {
                 const el = document.getElementById(id);
-                if (el) el.innerText = val !== undefined && val !== null ? val : '--';
+                if (el && val !== undefined && val !== null) {
+                    el.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+                    el.style.color = val >= 0 ? '#34d399' : '#f87171';
+                } else if (el) {
+                    el.innerText = '--';
+                }
             };
 
-            setVal('modal-roc20', (data.roc_20 >= 0 ? '+' : '') + (data.roc_20 !== undefined ? data.roc_20.toFixed(2) + '%' : '--'));
-            const r20El = document.getElementById('modal-roc20');
-            if (r20El) r20El.style.color = (data.roc_20 >= 0 ? '#34d399' : '#f87171');
+            const r20 = (data.roc_20d !== undefined) ? data.roc_20d : data.roc_20;
+            const r60 = (data.roc_60d !== undefined) ? data.roc_60d : data.roc_60;
+            const rsi = (data.rsi !== undefined) ? data.rsi : data.rsi_14;
+            const k = (data.latest_k !== undefined) ? data.latest_k : data.k_9;
+            const d = (data.latest_d !== undefined) ? data.latest_d : data.d_9;
 
-            setVal('modal-roc60', (data.roc_60 >= 0 ? '+' : '') + (data.roc_60 !== undefined ? data.roc_60.toFixed(2) + '%' : '--'));
-            const r60El = document.getElementById('modal-roc60');
-            if (r60El) r60El.style.color = (data.roc_60 >= 0 ? '#34d399' : '#f87171');
+            setVal('modal-roc20', r20);
+            setVal('modal-roc60', r60);
+            setVal('modal-bias50', data.bias_50sma);
 
-            setVal('modal-bias50', (data.bias_50sma >= 0 ? '+' : '') + (data.bias_50sma !== undefined ? data.bias_50sma.toFixed(2) + '%' : '--'));
-            const b50El = document.getElementById('modal-bias50');
-            if (b50El) b50El.style.color = (data.bias_50sma >= 0 ? '#34d399' : '#f87171');
-
-            setVal('modal-rsi', data.rsi_14 !== undefined ? data.rsi_14.toFixed(1) : '--');
-            setVal('modal-k9', data.k_9 !== undefined ? data.k_9.toFixed(1) : '--');
-            setVal('modal-d9', data.d_9 !== undefined ? data.d_9.toFixed(1) : '--');
+            const rsiEl = document.getElementById('modal-rsi');
+            if (rsiEl) rsiEl.innerText = (rsi !== undefined && rsi !== null) ? rsi.toFixed(1) : '--';
+            const kEl = document.getElementById('modal-k9');
+            if (kEl) kEl.innerText = (k !== undefined && k !== null) ? k.toFixed(1) : '--';
+            const dEl = document.getElementById('modal-d9');
+            if (dEl) dEl.innerText = (d !== undefined && d !== null) ? d.toFixed(1) : '--';
 
             const extLink = document.getElementById('modal-ext-link');
             if (extLink) {
                 if (data.is_tw) {
-                    const rawSym = data.symbol.replace('.TW', '');
+                    const rawSym = data.symbol.replace('.TW', '').replace('.TWO', '');
                     extLink.href = `https://tw.stock.yahoo.com/quote/${rawSym}`;
                     extLink.innerText = `在 Yahoo 奇摩股市查看 ${data.name} (${rawSym}) ↗`;
                 } else {
@@ -1270,13 +1276,12 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             mainContainer.innerHTML = '';
             kdContainer.innerHTML = '';
 
-            const isMobile = window.innerWidth < 768;
-            const chartHeight = isMobile ? 280 : 340;
-            const kdHeight = isMobile ? 95 : 110;
-            const chartWidth = mainContainer.clientWidth || 600;
+            const containerWidth = mainContainer.clientWidth || 600;
+            const isDesktop = window.innerWidth >= 768;
+            const mainHeight = isDesktop ? 340 : 280;
+            const kdHeight = isDesktop ? 110 : 95;
 
-            const chartOptions = {
-                width: chartWidth,
+            const commonOptions = {
                 layout: {
                     background: { color: '#0b0f19' },
                     textColor: '#94a3b8',
@@ -1288,28 +1293,28 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 },
                 crosshair: {
                     mode: LightweightCharts.CrosshairMode.Normal,
-                    vertLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 },
-                    horzLine: { color: 'rgba(148, 163, 184, 0.4)', width: 1, style: 2 }
+                    vertLine: { color: 'rgba(148, 163, 184, 0.45)', width: 1, style: 2 },
+                    horzLine: { color: 'rgba(148, 163, 184, 0.45)', width: 1, style: 2 }
                 },
                 rightPriceScale: {
-                    borderColor: '#243049',
-                    minimumWidth: 68,
-                    scaleMargins: { top: 0.1, bottom: 0.15 }
+                    borderColor: '#1e293b',
+                    minimumWidth: 72,
+                    scaleMargins: { top: 0.08, bottom: 0.08 }
                 },
                 timeScale: {
-                    borderColor: '#243049',
+                    borderColor: '#1e293b',
                     timeVisible: false,
+                    rightOffset: 2,
                     fixLeftEdge: true,
                     fixRightEdge: true
                 }
             };
 
-            mainChart = LightweightCharts.createChart(mainContainer, { ...chartOptions, height: chartHeight });
-            kdChart = LightweightCharts.createChart(kdContainer, {
-                ...chartOptions,
-                height: kdHeight,
-                timeScale: { ...chartOptions.timeScale, visible: false },
-                rightPriceScale: { ...chartOptions.rightPriceScale, scaleMargins: { top: 0.1, bottom: 0.1 } }
+            // 1. 建立 K 線主圖
+            mainChart = LightweightCharts.createChart(mainContainer, {
+                ...commonOptions,
+                width: containerWidth,
+                height: mainHeight
             });
 
             candleSeries = mainChart.addCandlestickSeries({
@@ -1320,84 +1325,130 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 wickDownColor: '#f87171'
             });
 
-            volumeSeries = mainChart.addHistogramSeries({
-                priceFormat: { type: 'volume' },
-                priceScaleId: '',
-                scaleMargins: { top: 0.82, bottom: 0 }
-            });
-
-            sma20Series = mainChart.addLineSeries({ color: '#c084fc', lineWidth: 1.5, title: '20MA' });
-            sma50Series = mainChart.addLineSeries({ color: '#fbbf24', lineWidth: 1.5, title: '50MA' });
-
-            kSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1.5, title: 'K(9)' });
-            dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.5, title: 'D(9)' });
-
-            candleSeries.setData(data.bars);
-            volumeSeries.setData(data.volumes);
-            sma20Series.setData(data.sma20);
-            sma50Series.setData(data.sma50);
-            kSeries.setData(data.kd_k);
-            dSeries.setData(data.kd_d);
+            const candleList = data.candles || data.bars || [];
+            candleSeries.setData(candleList);
 
             if (data.markers && data.markers.length > 0) {
                 candleSeries.setMarkers(data.markers);
             }
 
-            const totalBars = data.bars.length;
+            sma20Series = mainChart.addLineSeries({
+                color: '#c084fc',
+                lineWidth: 1.5,
+                crosshairMarkerVisible: false
+            });
+            sma20Series.setData(data.sma20 || []);
+
+            sma50Series = mainChart.addLineSeries({
+                color: '#fbbf24',
+                lineWidth: 2,
+                crosshairMarkerVisible: false
+            });
+            sma50Series.setData(data.sma50 || []);
+
+            volumeSeries = mainChart.addHistogramSeries({
+                priceFormat: { type: 'volume' },
+                priceScaleId: '',
+                scaleMargins: { top: 0.82, bottom: 0 }
+            });
+            volumeSeries.setData(candleList.map(c => ({
+                time: c.time,
+                value: c.v !== undefined ? c.v : (c.value || 0),
+                color: c.close >= c.open ? 'rgba(52, 211, 153, 0.35)' : 'rgba(248, 113, 113, 0.35)'
+            })));
+
+            // 2. 建立 KD 指標子圖
+            kdChart = LightweightCharts.createChart(kdContainer, {
+                ...commonOptions,
+                width: containerWidth,
+                height: kdHeight,
+                timeScale: {
+                    ...commonOptions.timeScale,
+                    visible: false
+                }
+            });
+
+            const upperRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+            const lowerRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
+            upperRef.setData(candleList.map(c => ({ time: c.time, value: 80 })));
+            lowerRef.setData(candleList.map(c => ({ time: c.time, value: 20 })));
+
+            kSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1.8, crosshairMarkerVisible: false });
+            kSeries.setData(data.kd_k || []);
+
+            dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.8, crosshairMarkerVisible: false });
+            dSeries.setData(data.kd_d || []);
+
+            // 3. 雙向同步鎖 (水平滾動/縮放 100% 嚴密對齊)
+            mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+                if (isSyncingRange || !range) return;
+                isSyncingRange = true;
+                kdChart.timeScale().setVisibleLogicalRange(range);
+                isSyncingRange = false;
+            });
+
+            kdChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+                if (isSyncingRange || !range) return;
+                isSyncingRange = true;
+                mainChart.timeScale().setVisibleLogicalRange(range);
+                isSyncingRange = false;
+            });
+
+            // 4. 十字準星連動與 HUD (滑鼠移開自動還原最新收盤價)
+            const candleMap = {};
+            candleList.forEach(c => candleMap[c.time] = c);
+            const sma20Map = {};
+            (data.sma20 || []).forEach(s => sma20Map[s.time] = s.value);
+            const sma50Map = {};
+            (data.sma50 || []).forEach(s => sma50Map[s.time] = s.value);
+            const kMap = {};
+            (data.kd_k || []).forEach(k => kMap[k.time] = k.value);
+            const dMap = {};
+            (data.kd_d || []).forEach(d => dMap[d.time] = d.value);
+
+            const handleMove = param => {
+                if (param && param.time) {
+                    const c = candleMap[param.time];
+                    if (c) {
+                        updateHUDByItem({
+                            time: c.time,
+                            open: c.open,
+                            high: c.high,
+                            low: c.low,
+                            close: c.close,
+                            sma20: sma20Map[param.time] || null,
+                            sma50: sma50Map[param.time] || null,
+                            k: kMap[param.time] || null,
+                            d: dMap[param.time] || null
+                        }, data.is_tw);
+                    }
+                } else if (candleList.length > 0) {
+                    const last = candleList[candleList.length - 1];
+                    updateHUDByItem({
+                        time: last.time,
+                        open: last.open,
+                        high: last.high,
+                        low: last.low,
+                        close: last.close,
+                        sma20: data.sma20 && data.sma20.length ? data.sma20[data.sma20.length - 1].value : null,
+                        sma50: data.sma50 && data.sma50.length ? data.sma50[data.sma50.length - 1].value : null,
+                        k: data.kd_k && data.kd_k.length ? data.kd_k[data.kd_k.length - 1].value : null,
+                        d: data.kd_d && data.kd_d.length ? data.kd_d[data.kd_d.length - 1].value : null
+                    }, data.is_tw);
+                }
+            };
+
+            mainChart.subscribeCrosshairMove(handleMove);
+            kdChart.subscribeCrosshairMove(handleMove);
+
+            // 預設視野聚焦最近 90 根 K 棒 (~4.5 個月)，視覺飽滿清晰，亦可隨意往左拖曳回溯全部歷史買賣點
+            const totalBars = candleList.length;
+            const defaultBars = 90;
+            const startBar = Math.max(0, totalBars - defaultBars);
             if (totalBars > 0) {
-                isSyncingRange = true;
-                const logicalRange = { from: 0, to: totalBars - 1 };
-                mainChart.timeScale().setVisibleLogicalRange(logicalRange);
-                kdChart.timeScale().setVisibleLogicalRange(logicalRange);
-                isSyncingRange = false;
+                mainChart.timeScale().setVisibleLogicalRange({ from: startBar, to: totalBars - 1 });
+                handleMove(null);
             }
-
-            const mainTimeScale = mainChart.timeScale();
-            const kdTimeScale = kdChart.timeScale();
-
-            mainTimeScale.subscribeVisibleLogicalRangeChange(range => {
-                if (isSyncingRange || !range) return;
-                isSyncingRange = true;
-                kdTimeScale.setVisibleLogicalRange(range);
-                isSyncingRange = false;
-            });
-
-            kdTimeScale.subscribeVisibleLogicalRangeChange(range => {
-                if (isSyncingRange || !range) return;
-                isSyncingRange = true;
-                mainTimeScale.setVisibleLogicalRange(range);
-                isSyncingRange = false;
-            });
-
-            const barMap = {};
-            data.bars.forEach((b, idx) => {
-                barMap[b.time] = {
-                    ...b,
-                    sma20: data.sma20[idx] ? data.sma20[idx].value : undefined,
-                    sma50: data.sma50[idx] ? data.sma50[idx].value : undefined,
-                    k: data.kd_k[idx] ? data.kd_k[idx].value : undefined,
-                    d: data.kd_d[idx] ? data.kd_d[idx].value : undefined
-                };
-            });
-
-            const defaultLastItem = totalBars > 0 ? barMap[data.bars[totalBars - 1].time] : {};
-            updateHUDByItem(defaultLastItem, data.is_tw);
-
-            mainChart.subscribeCrosshairMove(param => {
-                if (param && param.time && barMap[param.time]) {
-                    updateHUDByItem(barMap[param.time], data.is_tw);
-                } else {
-                    updateHUDByItem(defaultLastItem, data.is_tw);
-                }
-            });
-
-            kdChart.subscribeCrosshairMove(param => {
-                if (param && param.time && barMap[param.time]) {
-                    updateHUDByItem(barMap[param.time], data.is_tw);
-                } else {
-                    updateHUDByItem(defaultLastItem, data.is_tw);
-                }
-            });
         }
 
         /* 零股/複委託預算試算功能 */
@@ -2032,12 +2083,18 @@ class WebDashboardGenerator:
                 "price": curr_price,
                 "above_50sma": bool(latest["above_50sma"]),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
+                "roc_20": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
+                "roc_60": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
                 "bias_50sma": round(bias_50, 2),
                 "rsi": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
+                "rsi_14": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
                 "latest_k": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
+                "k_9": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
                 "latest_d": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
+                "d_9": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
                 "candles": candles,
+                "bars": candles,
                 "sma20": sma20_list,
                 "sma50": sma50_list,
                 "kd_k": kd_k_list,
