@@ -182,7 +182,7 @@ class AutoTrader:
 
                 curr_tw_positions = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
                 if tw_buys_count == 0 and curr_tw_positions:
-                    trade_logs.append("✅ 【台股多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
+                    trade_logs.append("✅ 【多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
             else:
                 trade_logs.append("🛡️ 【台股風控保護】目前台股前三強僅 1 檔站上 50MA，處於保守防禦模式，今日不開新倉。")
 
@@ -255,7 +255,7 @@ class AutoTrader:
 
                 curr_us_positions = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
                 if us_buys_count == 0 and curr_us_positions:
-                    trade_logs.append("✅ 【美股多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
+                    trade_logs.append("✅ 【多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
             else:
                 trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
 

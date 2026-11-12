@@ -45,12 +45,19 @@ def main():
         trend_status = "🟢 多頭(>50MA)" if row["above_50sma"] else "🔴 轉弱(<50MA)"
         print(f"#{idx+1:<3} {row['ticker']:<10} {row['name']:<12} {row['price']:<8} {row['roc_20d']:<10} {row['roc_60d']:<10} {row['score']:<10} {trend_status}")
     
-    bullish_tw = tw_rank[tw_rank["above_50sma"] == True]
-    if not bullish_tw.empty:
-        top_tw = bullish_tw.iloc[:config.top_n_picks]
-        print(f"\n💡 台股今日前 {len(top_tw)} 強勢首選: {', '.join(top_tw['name'].tolist())}")
+    # 台股大盤多空濾網判定 (前 3 強至少 2 檔站上 50MA)
+    tw_bull_count = tw_rank.head(3)["above_50sma"].sum() if not tw_rank.empty and "above_50sma" in tw_rank.columns else 0
+    tw_is_bull = (tw_bull_count >= 2)
+
+    if not tw_is_bull:
+        print("\n🛡️ 目前大盤濾網處於保守防禦模式（建議保留現金觀望，暫不建倉）")
     else:
-        print("\n🛡️ 目前全數標的跌破 50MA（處於空頭防禦期，建議 100% 現金觀望）")
+        bullish_tw = tw_rank[tw_rank["above_50sma"] == True]
+        if not bullish_tw.empty:
+            top_tw = bullish_tw.iloc[:config.top_n_picks]
+            print(f"\n💡 台股今日前 {len(top_tw)} 強勢首選: {', '.join(top_tw['name'].tolist())}")
+        else:
+            print("\n🛡️ 目前全數標的跌破 50MA（處於空頭防禦期，建議 100% 現金觀望）")
 
     print("\n" + "=" * 70)
     print("🇺🇸 【美股科技天團 - 最新動態天梯排名】")
@@ -61,12 +68,28 @@ def main():
         trend_status = "🟢 多頭(>50MA)" if row["above_50sma"] else "🔴 轉弱(<50MA)"
         print(f"#{idx+1:<3} {row['ticker']:<10} {row['name']:<12} {row['price']:<8} {row['roc_20d']:<10} {row['roc_60d']:<10} {row['score']:<10} {trend_status}")
     
-    bullish_us = us_rank[us_rank["above_50sma"] == True]
-    if not bullish_us.empty:
-        top_us = bullish_us.iloc[:config.top_n_picks]
-        print(f"\n💡 美股今日前 {len(top_us)} 強勢首選: {', '.join(top_us['ticker'].tolist())}")
+    # 美股大盤多空濾網判定 (前 3 強至少 2 檔站上 50MA 且 QQQ 站穩 200MA)
+    us_bull_count = us_rank.head(3)["above_50sma"].sum() if not us_rank.empty and "above_50sma" in us_rank.columns else 0
+    qqq_bull = True
+    if not us_rank.empty:
+        if "ticker" in us_rank.columns:
+            qqq_row = us_rank[us_rank["ticker"] == "QQQ"]
+            if not qqq_row.empty and "above_200sma" in qqq_row.columns:
+                qqq_bull = bool(qqq_row["above_200sma"].iloc[0])
+        elif "QQQ" in us_rank.index and "above_200sma" in us_rank.columns:
+            qqq_bull = bool(us_rank.loc["QQQ", "above_200sma"])
+
+    us_is_bull = (us_bull_count >= 2) and qqq_bull
+
+    if not us_is_bull:
+        print("\n🛡️ 目前大盤濾網處於保守防禦模式（建議保留現金觀望，暫不建倉）")
     else:
-        print("\n🛡️ 目前全數標的跌破 50MA（處於空頭防禦期，建議 100% 現金觀望）")
+        bullish_us = us_rank[us_rank["above_50sma"] == True]
+        if not bullish_us.empty:
+            top_us = bullish_us.iloc[:config.top_n_picks]
+            print(f"\n💡 美股今日前 {len(top_us)} 強勢首選: {', '.join(top_us['ticker'].tolist())}")
+        else:
+            print("\n🛡️ 目前全數標的跌破 50MA（處於空頭防禦期，建議 100% 現金觀望）")
 
     print("\n" + "=" * 70)
     print("🎉 【第一步驗收成功】：數據獲取、特徵工程與排序打分模組運作完全正常！")

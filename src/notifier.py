@@ -115,10 +115,14 @@ class LineNotifier:
         # 前 3 名中至少 2 檔站上 50MA 且 QQQ 年線多頭視為多頭攻擊
         top3_bull_count = int(rank_df.head(3)["above_50sma"].sum()) if "above_50sma" in rank_df.columns else 0
         qqq_bull = True
-        if "ticker" in rank_df.columns and "above_200sma" in rank_df.columns:
-            qqq_rows = rank_df[rank_df["ticker"] == "QQQ"]
-            if not qqq_rows.empty:
-                qqq_bull = bool(qqq_rows["above_200sma"].iloc[0])
+        if not rank_df.empty:
+            if "ticker" in rank_df.columns:
+                qqq_rows = rank_df[rank_df["ticker"] == "QQQ"]
+                if not qqq_rows.empty and "above_200sma" in qqq_rows.columns:
+                    qqq_bull = bool(qqq_rows["above_200sma"].iloc[0])
+            elif "QQQ" in rank_df.index and "above_200sma" in rank_df.columns:
+                qqq_bull = bool(rank_df.loc["QQQ", "above_200sma"])
+                
         is_bull_attack = bool(top3_bull_count >= 2 and qqq_bull)
 
         # 推薦列表優先顯示 above_50sma == True 的前 3 強
@@ -136,7 +140,7 @@ class LineNotifier:
 
         if not is_bull_attack:
             lines.extend([
-                "市場狀態：防禦觀望（主要標的跌破 50MA）",
+                "市場狀態：防禦觀望（主要標的跌破 50MA 或 QQQ 弱勢）",
                 "操作建議：維持現金，暫不開倉。",
                 "--- 觀察名單 ---"
             ])
@@ -149,7 +153,7 @@ class LineNotifier:
                 lines.append(f"{rank_idx}. {ticker} ${price:,.2f} | 評分 {score:+.1f}{status_str}")
         else:
             lines.extend([
-                "市場狀態：多頭攻擊（標的站穩 50MA）",
+                "市場狀態：多頭攻擊（標的站穩 50MA 且 QQQ 站穩年線）",
                 "操作建議（大戶投複委託）："
             ])
             for rank_idx, (_, row) in enumerate(display_df.iterrows(), start=1):

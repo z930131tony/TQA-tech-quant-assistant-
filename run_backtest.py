@@ -21,7 +21,7 @@ def print_result_card(res: dict, benchmark_return: float, benchmark_name: str):
     mdd = res.get("max_drawdown_pct", res.get("max_drawdown", 0.0))
     sharpe = res.get("sharpe_ratio", 0.0)
     win_rate = res.get("win_rate_pct", res.get("win_rate", 0.0))
-    total_trades = res.get("total_trades", len(res.get("trades_df", [])))
+    total_trades = res.get("closed_trades", res.get("total_trades", len(res.get("trades_df", []))))
 
     print("\n" + "=" * 65)
     print(f"📊 【{res.get('market', '')} 市場科技策略回測報告】")

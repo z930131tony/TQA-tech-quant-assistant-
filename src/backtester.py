@@ -253,7 +253,7 @@ class TechBacktester:
                     for ticker in list(holdings.keys()):
                         if ticker not in target_tickers and ticker not in [x[0] for x in pending_sells]:
                             pending_sells.append((ticker, "調倉換股 (動能減弱/跌破50MA, 隔日開盤出清)"))
-                    # 買進目標持股 (於明日開盤執行)
+                    # 買進目標持股 (於明日開盤執行，且排除停損名單)
                     if target_tickers:
                         equity = cash
                         for t, s in holdings.items():
@@ -266,7 +266,8 @@ class TechBacktester:
                                     equity += s * float(p_sub.iloc[-1])
                         target_alloc = equity / self.top_n
                         for ticker, score, _ in top_targets:
-                            pending_buys.append((ticker, target_alloc, score))
+                            if ticker not in [x[0] for x in pending_sells]:
+                                pending_buys.append((ticker, target_alloc, score))
                 else:
                     # same_close: 當日收盤直接買賣
                     # 1. 賣出：平倉不在目標清單中的持股
