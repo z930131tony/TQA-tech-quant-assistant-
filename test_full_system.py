@@ -204,11 +204,11 @@ try:
     
     # 必須包含 14:30 TST (UTC 06:30) 與美股收盤 (UTC 21:15 或 22:15)
     has_tw_cron = any("30 6" in c for c in cron_list)
-    has_us_cron = any("15 21" in c or "15 22" in c for c in cron_list)
+    has_us_cron = any("15 21" in c or "15 22" in c or "30 22" in c for c in cron_list)
     no_push_loop = ("push" not in on_section)
 
     print(f"  ✅ 台股收盤排程 (14:30 TST) 設定: {has_tw_cron}")
-    print(f"  ✅ 美股收盤排程 (05:15/06:15 TST) 設定: {has_us_cron}")
+    print(f"  ✅ 美股收盤排程 (06:30 TST) 設定: {has_us_cron}")
     print(f"  ✅ 已成功移除 on: push 自動觸發 (終止 Git 分岔循環): {no_push_loop}")
 
     results["GitHub排程工作流"] = (has_tw_cron and has_us_cron and no_push_loop)

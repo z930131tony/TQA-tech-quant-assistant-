@@ -1,12 +1,12 @@
 name: Tech Quant Daily Scheduler & Webpage Deploy
 
 # 定時排程：
-# 1. 台股收盤排程：週一至週五 台灣 14:30 (UTC 06:30)，收盤後一小時結算與晨盤推播
-# 2. 美股收盤排程：週一至週五 台灣 05:15 (UTC 21:15)，夏令/冬令收盤後結算與夜盤推播
+# 1. 台股收盤排程：週一至週五 台灣 14:30 (UTC 06:30)，收盤後自動更新與推播
+# 2. 美股收盤排程：週二至週六 台灣 06:30 (UTC 22:30)，收盤後自動更新與推播
 on:
   schedule:
     - cron: '30 6 * * 1-5'    # 台股收盤結算 (台灣 14:30 / UTC 06:30)
-    - cron: '15 21 * * 1-5'   # 美股收盤結算 (台灣 05:15 / UTC 21:15)
+    - cron: '30 22 * * 1-5'   # 美股收盤結算 (台灣 06:30 / UTC 22:30)
   workflow_dispatch:          # 支援 GitHub 網頁手動觸發執行
     inputs:
       market:
@@ -47,21 +47,17 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
           PORTFOLIO_SHEET_URL: ${{ secrets.PORTFOLIO_SHEET_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python run_daily.py --market ${{ github.event.inputs.market || 'AUTO' }}
           python generate_web.py || true
 
-      - name: 提交更新後的檔案至 main 分支
+      - name: Auto Commit and Push Updated Dashboard
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Actions"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           git add index.html portfolio.json
-          git diff --staged --quiet || git commit -m "chore(auto): 自動更新股市數據與儀表板 [skip ci]"
-          git pull --rebase --autostash origin main || true
-          git push origin main
+          git diff --staged --quiet || (git commit -m "chore: auto-update TQA dashboard ($(date +'%Y-%m-%d %H:%M')) [skip ci]" && git pull --rebase --autostash origin main && git push)
 
       - name: 自動部署到 GitHub Pages (供手機隨時瀏覽)
         uses: peaceiris/actions-gh-pages@v4
