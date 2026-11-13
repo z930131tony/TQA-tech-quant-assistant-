@@ -26,12 +26,14 @@ class TechBacktester:
         rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
         top_n: int = 3,                    # 持有前 N 強標的
         enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
-        trailing_stop_pct: float = 0.08,   # 移動停利停損 8%
+        trailing_stop_pct: float = 0.08,   # 移動停利停損 8% (美股標準)
         hard_stop_pct: float = 0.30,       # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
         start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
         end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
         execution_mode: str = "next_open", # 預設為 "next_open" (隔日開盤成交，消除收盤偷價偏差)
-        turnover_buffer: bool = False      # 奧卡姆剃刀：關閉換股緩衝，讓強勢動能領頭羊全速進場
+        rebalance_buffer: bool = False,    # 換股動能緩衝：台股移除以恢復敏銳前 top_n 強輪動
+        turnover_buffer: Optional[bool] = None, # 相容舊版參數名
+        trailing_stop_pct_tw: Optional[float] = None  # 台股專屬移動停損 (預設 10%，適配高波動抗洗盤)
     ):
         self.dataset = dataset
         self.initial_capital = initial_capital
@@ -45,7 +47,9 @@ class TechBacktester:
         self.start_date = start_date
         self.end_date = end_date
         self.execution_mode = execution_mode
-        self.turnover_buffer = turnover_buffer
+        self.rebalance_buffer = turnover_buffer if turnover_buffer is not None else rebalance_buffer
+        self.turnover_buffer = self.rebalance_buffer
+        self.trailing_stop_pct_tw = trailing_stop_pct_tw
 
     def run(self, market: str = "US") -> Dict:
         """
@@ -66,6 +70,8 @@ class TechBacktester:
         sell_tax = self.tax_rate_tw if market == "TW" else 0.0
         total_sell_cost = self.fee_rate + sell_tax
         buy_cost_rate = self.fee_rate
+        # 市場專屬移動停損參數解耦 (台股高波動設為 10% 避免被洗盤，美股維持 8%)
+        curr_trailing_stop = self.trailing_stop_pct_tw if (market == "TW" and self.trailing_stop_pct_tw is not None) else (0.10 if market == "TW" else self.trailing_stop_pct)
 
         # 2. 獲取公共交易日曆
         all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_data.values()])))
@@ -190,12 +196,12 @@ class TechBacktester:
                         liquidate_due_to_stop.append((ticker, curr_price, "戰術絕對停損 (虧損達30%)"))
                         continue
 
-                    # 2. 檢查 -8% 移動停利停損 (進場隔日後啟動最高價追蹤)
+                    # 2. 檢查移動停利停損 (進場隔日後啟動最高價追蹤)
                     if entry_dates.get(ticker) and current_date > entry_dates[ticker]:
                         peak_prices[ticker] = max(peak_prices.get(ticker, curr_price), curr_price)
                         drawdown_from_peak = (peak_prices[ticker] - curr_price) / peak_prices[ticker]
-                        if drawdown_from_peak >= self.trailing_stop_pct:
-                            liquidate_due_to_stop.append((ticker, curr_price, "停損平倉 (回檔達8%)"))
+                        if drawdown_from_peak >= curr_trailing_stop:
+                            liquidate_due_to_stop.append((ticker, curr_price, f"停損平倉 (回檔達{curr_trailing_stop*100:.0f}%)"))
 
             stopped_out_today = {t for t, _, _ in liquidate_due_to_stop}
 
@@ -260,16 +266,8 @@ class TechBacktester:
                             all_scores.append((t, sc, bool(r["above_50sma"])))
                     all_scores.sort(key=lambda x: x[1], reverse=True)
                     top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
-                    tw_leaders_bull = (top3_bull_count >= 2)
-
-                    tw_bench_bull = True
-                    b_df = filtered_data.get("0050.TW", self.dataset.get("0050.TW"))
-                    if b_df is not None and current_date in b_df.index:
-                        b_c = float(b_df.loc[current_date, "close"])
-                        b_sma50 = float(b_df.loc[current_date, "sma_50"]) if "sma_50" in b_df.columns else float(b_df["close"].rolling(50).mean().loc[current_date])
-                        tw_bench_bull = (b_c >= b_sma50) if not np.isnan(b_sma50) else True
-
-                    is_market_bull = (tw_leaders_bull and tw_bench_bull)
+                    # 台股採用敏銳領頭羊廣度判斷，消除 50MA 遲鈍踏空風險
+                    is_market_bull = (top3_bull_count >= 2)
                 elif market == "US":
                     all_scores = []
                     for t, d in filtered_data.items():
@@ -296,20 +294,9 @@ class TechBacktester:
                     target_tickers = []
                     top_targets = []
                 else:
-                    # 調倉選股目標判定
-                    if self.turnover_buffer and market == "TW":
-                        cand_map = {c[0]: c for c in candidates}
-                        held_in_buffer = [t for t in holdings.keys() if t in [c[0] for c in candidates[:self.top_n + 1]]]
-                        target_tickers = list(held_in_buffer)
-                        for c in candidates:
-                            if len(target_tickers) >= self.top_n:
-                                break
-                            if c[0] not in target_tickers:
-                                target_tickers.append(c[0])
-                        top_targets = [cand_map[t] for t in target_tickers]
-                    else:
-                        top_targets = candidates[:self.top_n]
-                        target_tickers = [x[0] for x in top_targets]
+                    # 台股嚴格強輪動，挑選動能最強前 top_n 標的
+                    top_targets = candidates[:self.top_n]
+                    target_tickers = [x[0] for x in top_targets]
 
                 # 奧卡姆剃刀：徹底移除底部減倉陷阱，全速 100% 資金滿額投入領頭羊
                 if self.execution_mode == "next_open":
