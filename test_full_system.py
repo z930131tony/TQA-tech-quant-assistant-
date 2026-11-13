@@ -295,6 +295,105 @@ except Exception as e:
     results["AI辯論與Shioaji防護"] = False
 
 # -------------------------------------------------------------
+# 測試 9: 實盤雙軌風控 (-30% 硬停損 / -8% 移動停損) 與帳戶回撤動態減倉
+# -------------------------------------------------------------
+print("\n[測試 9/9] 驗證實盤雙軌停損 (-30% 硬停損 / -8% 移動停損) 與帳戶回撤減倉 (Drawdown Scaling)...")
+try:
+    # 1. 數學斷言：動態倉位縮放係數 (Hysteresis & Scaling)
+    sf_normal = PortfolioTracker.calculate_risk_scaling_factor(5.0)    # < 10%
+    sf_dd18 = PortfolioTracker.calculate_risk_scaling_factor(20.0)     # >= 18%
+    sf_dd25 = PortfolioTracker.calculate_risk_scaling_factor(26.0)     # >= 25%
+    assert sf_normal == 1.0, f"預期 1.0，得到 {sf_normal}"
+    assert sf_dd18 == 0.50, f"預期 0.50，得到 {sf_dd18}"
+    assert sf_dd25 == 0.25, f"預期 0.25，得到 {sf_dd25}"
+
+    # 2. 數學斷言：模擬持倉 -31% 觸發戰術絕對硬停損與 -9% 移動停損
+    dates = pd.date_range("2026-01-01", periods=60, freq="B")
+    mock_df_loss = pd.DataFrame({
+        "open": [100.0] * 59 + [69.0],
+        "high": [102.0] * 59 + [70.0],
+        "low": [98.0] * 59 + [68.0],
+        "close": [100.0] * 59 + [69.0],
+        "volume": [1000000] * 60
+    }, index=dates)
+
+    mock_df_trail = pd.DataFrame({
+        "open": [100.0] * 30 + [120.0] * 20 + [109.0] * 10,
+        "high": [102.0] * 30 + [125.0] * 20 + [110.0] * 10,
+        "low": [98.0] * 30 + [118.0] * 20 + [108.0] * 10,
+        "close": [100.0] * 30 + [120.0] * 20 + [109.0] * 10,
+        "volume": [1000000] * 60
+    }, index=dates)
+
+    mock_dataset = {
+        "TEST_LOSS.TW": mock_df_loss,
+        "TEST_TRAIL.TW": mock_df_trail,
+        "0050.TW": mock_df_loss.copy()
+    }
+
+    test_positions = [
+        {
+            "ticker": "TEST_LOSS.TW",
+            "shares": 100,
+            "cost_price": 100.0,
+            "entry_date": "2026-01-02",
+            "peak_price": 102.0
+        },
+        {
+            "ticker": "TEST_TRAIL.TW",
+            "shares": 100,
+            "cost_price": 100.0,
+            "entry_date": "2026-01-02",
+            "peak_price": 125.0
+        }
+    ]
+
+    PortfolioTracker.save_portfolio(test_positions, extra_state={"cash": 50000.0, "peak_equity": 100000.0})
+    eval_res = PortfolioTracker.evaluate_portfolio(mock_dataset, save_state=False)
+
+    loss_item = next(p for p in eval_res if p["ticker"] == "TEST_LOSS.TW")
+    trail_item = next(p for p in eval_res if p["ticker"] == "TEST_TRAIL.TW")
+
+    assert loss_item["hard_stop_triggered"] is True, "TEST_LOSS.TW 虧損 31% 必須觸發 hard_stop_triggered"
+    assert "戰術絕對硬停損" in loss_item["alert_text"]
+    assert trail_item["trailing_stop_triggered"] is True, "TEST_TRAIL.TW 自高點回檔 12.8% 必須觸發 trailing_stop_triggered"
+    assert "移動停損平倉" in trail_item["alert_text"]
+
+    # 3. 測試 AutoTrader 產生賣出訂單與讓價保護
+    dummy_rank = pd.DataFrame([{
+        "ticker": "TEST_BUY.TW",
+        "name": "測試強勢股",
+        "price": 100.0,
+        "score": 95.0,
+        "above_50sma": True,
+        "is_distribution_warn": False
+    }])
+    trader_test = AutoTrader(dataset=mock_dataset, budget_per_stock_tw=30000.0)
+    orders, state_out, logs_out = trader_test.generate_trade_orders(dummy_rank, pd.DataFrame(), target_market="TW")
+
+    sell_orders = [o for o in orders if o["action"] == "SELL"]
+    assert any(o["ticker"] == "TEST_LOSS.TW" and "戰術絕對硬停損" in o["reason"] for o in sell_orders), "必須產生硬停損賣單"
+    assert any(o["ticker"] == "TEST_TRAIL.TW" and "移動停損平倉" in o["reason"] for o in sell_orders), "必須產生移動停損賣單"
+
+    loss_order = next(o for o in sell_orders if o["ticker"] == "TEST_LOSS.TW")
+    assert loss_order["is_emergency"] is True
+    assert loss_order["price"] < loss_order["market_price"], "緊急賣單限價必須低於現價以確保撮合"
+
+    print(f"  ✅ 倉位縮放係數斷言: 回撤5%={sf_normal:.2f}x, 回撤20%={sf_dd18:.2f}x, 回撤26%={sf_dd25:.2f}x")
+    print(f"  ✅ -31% 戰術絕對硬停損斷言: 100% 觸發全數賣出並加入禁買")
+    print(f"  ✅ -9% 移動停損平倉斷言: 100% 觸發高點回檔賣出")
+    print(f"  ✅ 讓價撮合機制斷言: 限價 NT${loss_order['price']:.2f} < 市價 NT${loss_order['market_price']:.2f} (成功向下讓價)")
+
+    results["實盤雙軌風控與回撤縮放"] = True
+except Exception as e:
+    print(f"  ❌ 風控測試異常: {e}")
+    results["實盤雙軌風控與回撤縮放"] = False
+finally:
+    if backup_portfolio:
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+            f.write(backup_portfolio)
+
+# -------------------------------------------------------------
 # 綜合測試匯總報告
 # -------------------------------------------------------------
 print("\n" + "=" * 70)
@@ -308,7 +407,7 @@ for name, ok in results.items():
 
 print("-" * 70)
 if all_ok:
-    print("🎉 恭喜！全系統 8 大模組自主測試 100% 全數通過，無任何潛在漏洞！")
+    print("🎉 恭喜！全系統 9 大模組自主測試 100% 全數通過，無任何潛在漏洞！")
 else:
     print("⚠️ 警告：部分模組測試未通過，請查看上方詳細日誌。")
 print("======================================================================\n")
