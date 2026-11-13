@@ -2,13 +2,14 @@
 * text=auto
 
 # 排除生成之靜態儀表板與大體積數據，不計入 GitHub 語言統計 (讓專案正確識別為 100% Python)
-index.html linguist-detectable=false
-index.html linguist-generated=true
-index.html linguist-vendored
-*.html linguist-detectable=false
-*.html linguist-generated=true
 *.html linguist-vendored
-data_cache/* linguist-detectable=false
-data_cache/* linguist-vendored
-*.csv linguist-detectable=false
+*.html linguist-generated
+*.html -diff
+index.html linguist-vendored
+index.html linguist-generated
+index.html -diff
+
+data_cache/** linguist-vendored
+data_cache/** linguist-generated
 *.csv linguist-vendored
+*.csv linguist-generated

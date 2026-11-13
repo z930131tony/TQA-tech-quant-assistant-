@@ -943,6 +943,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace; font-size: 14px;">-</span>
                         <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
+                    <div id="modal-microstructure-badges" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;"></div>
                 </div>
                 <button class="close-btn" onclick="closeStockModal()">✕</button>
             </div>
@@ -1233,6 +1234,30 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             if (kEl) kEl.innerText = (k !== undefined && k !== null) ? k.toFixed(1) : '--';
             const dEl = document.getElementById('modal-d9');
             if (dEl) dEl.innerText = (d !== undefined && d !== null) ? d.toFixed(1) : '--';
+
+            const microEl = document.getElementById('modal-microstructure-badges');
+            if (microEl) {
+                let badges = [];
+                const ker = (data.ker_20 !== undefined) ? data.ker_20 : 0.0;
+                const isVcp = !!data.is_vcp_squeeze;
+                const vcp = (data.vcp_ratio !== undefined) ? data.vcp_ratio : 1.0;
+                const ud = (data.ud_vol_ratio !== undefined) ? data.ud_vol_ratio : 1.0;
+                
+                if (ker >= 0.50) {
+                    badges.push('<span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(96,165,250,0.5);">⚡平滑鎖碼 (KER ' + ker.toFixed(2) + ')</span>');
+                } else if (ker > 0) {
+                    badges.push('<span class="badge" style="background:rgba(51,65,85,0.4); color:#94a3b8;">KER ' + ker.toFixed(2) + '</span>');
+                }
+                if (isVcp) {
+                    badges.push('<span class="badge" style="background:rgba(234,88,12,0.2); color:#fb923c; border:1px solid rgba(251,146,60,0.5);">🔥VCP蓄勢 (' + (vcp*100).toFixed(0) + '%)</span>');
+                }
+                if (ud >= 1.25) {
+                    badges.push('<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.5);">💎法人吸籌 (UD ' + ud.toFixed(2) + ')</span>');
+                } else if (ud > 0) {
+                    badges.push('<span class="badge" style="background:rgba(51,65,85,0.4); color:#94a3b8;">量價比 ' + ud.toFixed(2) + '</span>');
+                }
+                microEl.innerHTML = badges.join('');
+            }
 
             const extLink = document.getElementById('modal-ext-link');
             if (extLink) {
@@ -1720,6 +1745,11 @@ class WebDashboardGenerator:
             roc20 = float(row.get("roc_20d", row.get("roc_20", 0.0)))
             score = float(row.get("score", row.get("composite_score", 0.0)))
             above50 = bool(row.get("above_50sma", False))
+            ker20 = float(row.get("ker_20", 0.0))
+            is_vcp = bool(row.get("is_vcp_squeeze", False))
+            vcp_ratio = float(row.get("vcp_ratio", 1.0))
+            ud_vol = float(row.get("ud_vol_ratio", 1.0))
+
             prefix = "NT$" if is_tw else "$"
             market_tag = "tw" if is_tw else "us"
             stop_price = price * 0.92
@@ -1727,6 +1757,16 @@ class WebDashboardGenerator:
             
             roc_color = "#34d399" if roc20 >= 0 else "#f87171"
             roc_sign = "+" if roc20 >= 0 else ""
+
+            # 三大價量微結構因子標籤
+            micro_badges = []
+            if ker20 >= 0.50:
+                micro_badges.append('<span class="badge" style="background:rgba(59,130,246,0.18); color:#60a5fa; border:1px solid rgba(96,165,250,0.5); font-size:10px; padding:1px 5px;">⚡平滑鎖碼</span>')
+            if is_vcp:
+                micro_badges.append('<span class="badge" style="background:rgba(234,88,12,0.18); color:#fb923c; border:1px solid rgba(251,146,60,0.5); font-size:10px; padding:1px 5px;">🔥VCP蓄勢</span>')
+            if ud_vol >= 1.25:
+                micro_badges.append('<span class="badge" style="background:rgba(168,85,247,0.18); color:#c084fc; border:1px solid rgba(192,132,252,0.5); font-size:10px; padding:1px 5px;">💎法人吸籌</span>')
+            micro_html = f'<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">{"".join(micro_badges)}</div>' if micro_badges else ""
             
             # 【關鍵修復】：若標的跌破 50MA，或大盤處於保守防禦且個股破線，加上醒目橘紅標籤
             warning_badge_html = ""
@@ -1743,10 +1783,11 @@ class WebDashboardGenerator:
                     <span class="rank-num">#{idx + 1}</span>
                     <div>
                         <div class="stock-name">{name}</div>
-                        <div class="stock-sub">{ticker} • 綜合分: {score:.1f}</div>
+                        <div class="stock-sub">{ticker} • 綜合分: {score:.1f} • KER: {ker20:.2f} • UD: {ud_vol:.2f}</div>
                         <div style="margin-top: 4px; font-size: 11px; font-family: monospace; color: #94a3b8;">
                             建議買進: <span class="calc-shares" style="color: #38bdf8; font-weight: bold;">--</span> 股 • <span style="color: #cbd5e1;">-8%停損:</span> <span style="color: #f87171; font-weight: 600;">{stop_price_str}</span>
                         </div>
+                        {micro_html}
                     </div>
                 </div>
                 <div style="text-align: right;">
@@ -1934,11 +1975,25 @@ class WebDashboardGenerator:
             d9 = row.get("d9", row.get("d_9", 50.0))
             score = row.get("score", row.get("composite_score", 0.0))
             above50 = row["above_50sma"]
+            ker20 = float(row.get("ker_20", 0.0))
+            is_vcp = bool(row.get("is_vcp_squeeze", False))
+            vcp_ratio = float(row.get("vcp_ratio", 1.0))
+            ud_vol = float(row.get("ud_vol_ratio", 1.0))
             prefix = "NT$" if is_tw else "$"
 
             roc20_color = "green" if roc20 >= 0 else "red"
             roc60_color = "green" if roc60 >= 0 else "red"
             badge_html = '<span class="badge badge-bull">站上50MA</span>' if above50 else '<span class="badge badge-bear">跌破50MA</span>'
+
+            # 三大價量微結構因子標籤
+            micro_badges = []
+            if ker20 >= 0.50:
+                micro_badges.append('<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(96,165,250,0.4); font-size:10px; padding:1px 4px; border-radius:3px;">⚡平滑鎖碼</span>')
+            if is_vcp:
+                micro_badges.append('<span class="badge" style="background:rgba(234,88,12,0.15); color:#fb923c; border:1px solid rgba(251,146,60,0.4); font-size:10px; padding:1px 4px; border-radius:3px;">🔥VCP蓄勢</span>')
+            if ud_vol >= 1.25:
+                micro_badges.append('<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(192,132,252,0.4); font-size:10px; padding:1px 4px; border-radius:3px;">💎法人吸籌</span>')
+            micro_badges_html = f'<div style="margin-top:3px; display:flex; gap:3px; flex-wrap:wrap;">{"".join(micro_badges)}</div>' if micro_badges else ""
 
             row_html = f"""
             <tr onclick="openStockModal('{ticker}')" class="clickable stock-row" data-ticker="{ticker}" data-name="{name}" data-above="{1 if above50 else 0}">
@@ -1946,6 +2001,7 @@ class WebDashboardGenerator:
                 <td>
                     <span style="font-weight: bold; color: #f1f5f9;">{name}</span>
                     <span style="color: #64748b; font-size: 12px; margin-left: 4px; font-family: monospace;">{ticker}</span>
+                    {micro_badges_html}
                 </td>
                 <td class="text-right font-mono" style="font-weight: bold;">{prefix}{price:,.2f}</td>
                 <td class="text-right font-mono {roc20_color}">{(('+' if roc20 >= 0 else '') + f'{roc20:.2f}%')}</td>
@@ -2093,6 +2149,10 @@ class WebDashboardGenerator:
                 "k_9": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
                 "latest_d": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
                 "d_9": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
+                "ker_20": round(float(latest.get("ker_20", 0.0)), 2) if not np.isnan(latest.get("ker_20", 0.0)) else 0.0,
+                "vcp_ratio": round(float(latest.get("vcp_ratio", 1.0)), 2) if not np.isnan(latest.get("vcp_ratio", 1.0)) else 1.0,
+                "is_vcp_squeeze": bool(latest.get("is_vcp_squeeze", False)),
+                "ud_vol_ratio": round(float(latest.get("ud_vol_ratio", 1.0)), 2) if not np.isnan(latest.get("ud_vol_ratio", 1.0)) else 1.0,
                 "candles": candles,
                 "bars": candles,
                 "sma20": sma20_list,

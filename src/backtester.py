@@ -96,9 +96,23 @@ class TechBacktester:
         
         pending_sells = []   # 用于 next_open 模式: [(ticker, reason)]
         pending_buys = []    # 用于 next_open 模式: [(ticker, budget, score)]
+        peak_portfolio_equity = self.initial_capital
 
         # 4. 開始日線回測循環
         for day_idx, current_date in enumerate(test_dates):
+            # 追蹤帳戶總淨值與歷史峰值回撤 (Portfolio-Level Drawdown Scaling)
+            cur_equity = cash
+            for t, s in holdings.items():
+                df = filtered_data[t]
+                if current_date in df.index:
+                    cur_equity += s * float(df.loc[current_date, "close"])
+                else:
+                    p_sub = df.loc[df.index <= current_date, "close"]
+                    if not p_sub.empty:
+                        cur_equity += s * float(p_sub.iloc[-1])
+            peak_portfolio_equity = max(peak_portfolio_equity, cur_equity)
+            portfolio_dd = (peak_portfolio_equity - cur_equity) / peak_portfolio_equity if peak_portfolio_equity > 0 else 0.0
+
             # 若為 next_open 模式，於今日開盤市價執行昨日留存委託
             if self.execution_mode == "next_open":
                 # 執行昨日 pending 賣單
@@ -249,7 +263,18 @@ class TechBacktester:
                             all_scores.append((t, sc, bool(r["above_50sma"])))
                     all_scores.sort(key=lambda x: x[1], reverse=True)
                     top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
-                    is_market_bull = (top3_bull_count >= 2)
+                    tw_leaders_bull = (top3_bull_count >= 2)
+
+                    tw_bench_bull = True
+                    b_df = filtered_data.get("0050.TW", self.dataset.get("0050.TW"))
+                    if b_df is not None and current_date in b_df.index:
+                        b_c = float(b_df.loc[current_date, "close"])
+                        b_sma200 = float(b_df.loc[current_date, "sma_200"]) if "sma_200" in b_df.columns else float(b_df["close"].rolling(200).mean().loc[current_date])
+                        b_sma50 = float(b_df.loc[current_date, "sma_50"]) if "sma_50" in b_df.columns else float(b_df["close"].rolling(50).mean().loc[current_date])
+                        sma = b_sma200 if not np.isnan(b_sma200) else b_sma50
+                        tw_bench_bull = (b_c >= sma) if not np.isnan(sma) else True
+
+                    is_market_bull = (tw_leaders_bull and tw_bench_bull)
                 elif market == "US":
                     all_scores = []
                     for t, d in filtered_data.items():
@@ -290,6 +315,10 @@ class TechBacktester:
                     else:
                         top_targets = candidates[:self.top_n]
                         target_tickers = [x[0] for x in top_targets]
+
+                # 帳戶總淨值動態降倉保護 (Portfolio-Level Drawdown Scaling)
+                # 當帳戶總回撤達 18% 時，自動將最大持倉比例降為原本的 50% (保留 50% 現金緩衝)
+                scale_mult = 0.5 if portfolio_dd >= 0.18 else 1.0
                 
                 if self.execution_mode == "next_open":
                     for ticker in list(holdings.keys()):
@@ -305,7 +334,7 @@ class TechBacktester:
                                 p_sub = df.loc[df.index <= current_date, "close"]
                                 if not p_sub.empty:
                                     equity += s * float(p_sub.iloc[-1])
-                        target_alloc = equity / self.top_n
+                        target_alloc = (equity * scale_mult) / self.top_n
                         for ticker, score, _ in top_targets:
                             if ticker not in [x[0] for x in pending_sells]:
                                 pending_buys.append((ticker, target_alloc, score))
@@ -346,7 +375,7 @@ class TechBacktester:
                                 if not p_sub.empty:
                                     equity += s * float(p_sub.iloc[-1])
                         
-                        target_alloc_per_ticker = equity / self.top_n
+                        target_alloc_per_ticker = (equity * scale_mult) / self.top_n
                         for ticker, score, curr_price in top_targets:
                             current_shares = holdings.get(ticker, 0.0)
                             current_val = current_shares * curr_price
@@ -398,12 +427,13 @@ class TechBacktester:
         perf_df["daily_return"] = perf_df["portfolio_value"].pct_change().fillna(0)
         
         total_days = len(perf_df)
-        years = total_days / 252.0
+        cal_days = (test_dates[-1] - test_dates[0]).days if len(test_dates) > 1 else len(perf_df)
+        years = max(cal_days / 365.25, 0.1)
         start_val = self.initial_capital
         end_val = perf_df["portfolio_value"].iloc[-1]
         
         total_return = (end_val / start_val - 1.0) * 100.0
-        cagr = ((end_val / start_val) ** (1.0 / max(years, 0.1)) - 1.0) * 100.0
+        cagr = ((end_val / start_val) ** (1.0 / years) - 1.0) * 100.0
         
         cum_max = perf_df["portfolio_value"].cummax()
         drawdown = (perf_df["portfolio_value"] - cum_max) / cum_max
