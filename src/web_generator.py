@@ -941,6 +941,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                     <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">
                         最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace; font-size: 14px;">-</span>
+                        <span id="modal-ret1d" style="font-weight: bold; font-family: monospace; font-size: 13px; margin-left: 6px;">-</span>
                         <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
                     <div id="modal-microstructure-badges" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;"></div>
@@ -1198,6 +1199,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('modal-name').innerText = data.name;
             document.getElementById('modal-symbol').innerText = data.symbol;
             document.getElementById('modal-price').innerText = (data.is_tw ? 'NT$' : '$') + data.price.toLocaleString(undefined, {minimumFractionDigits: 2});
+
+            const ret1d = (data.ret_1d !== undefined) ? data.ret_1d : (data.chg_1d !== undefined ? data.chg_1d : null);
+            const ret1dEl = document.getElementById('modal-ret1d');
+            if (ret1dEl && ret1d !== null) {
+                ret1dEl.innerText = (ret1d >= 0 ? '+' : '') + ret1d.toFixed(2) + '%';
+                ret1dEl.style.color = (ret1d >= 0 ? '#34d399' : '#f87171');
+            } else if (ret1dEl) {
+                ret1dEl.innerText = '';
+            }
 
             const trendBadge = document.getElementById('modal-trend-badge');
             if (data.above_50sma) {
@@ -1742,6 +1752,7 @@ class WebDashboardGenerator:
             ticker = row["ticker"]
             name = TECH_UNIVERSE_TW.get(ticker, ticker) if is_tw else ticker
             price = float(row.get("price", row.get("close", 0.0)))
+            ret1d = float(row.get("ret_1d", row.get("chg_1d", 0.0)))
             roc20 = float(row.get("roc_20d", row.get("roc_20", 0.0)))
             score = float(row.get("score", row.get("composite_score", 0.0)))
             above50 = bool(row.get("above_50sma", False))
@@ -1755,6 +1766,8 @@ class WebDashboardGenerator:
             stop_price = price * 0.92
             stop_price_str = f"NT${stop_price:,.1f}" if is_tw else f"${stop_price:,.2f}"
             
+            ret1d_color = "#34d399" if ret1d >= 0 else "#f87171"
+            ret1d_sign = "+" if ret1d >= 0 else ""
             roc_color = "#34d399" if roc20 >= 0 else "#f87171"
             roc_sign = "+" if roc20 >= 0 else ""
 
@@ -1792,7 +1805,8 @@ class WebDashboardGenerator:
                 </div>
                 <div style="text-align: right;">
                     <div style="font-weight: bold; font-family: monospace; font-size: 15px;">{prefix}{price:,.2f}</div>
-                    <div style="color: {roc_color}; font-size: 13px; font-family: monospace;">{roc_sign}{roc20:.2f}%</div>
+                    <div style="color: {ret1d_color}; font-size: 13px; font-weight: bold; font-family: monospace;">{ret1d_sign}{ret1d:.2f}%</div>
+                    <div style="color: #94a3b8; font-size: 10px; font-family: monospace;">20日: {roc_sign}{roc20:.2f}%</div>
                     {warning_badge_html}
                 </div>
             </div>
@@ -1969,6 +1983,7 @@ class WebDashboardGenerator:
             ticker = row["ticker"]
             name = TECH_UNIVERSE_TW.get(ticker, ticker) if is_tw else ticker
             price = row.get("price", row.get("close", 0.0))
+            ret1d = float(row.get("ret_1d", row.get("chg_1d", 0.0)))
             roc20 = row.get("roc_20d", row.get("roc_20", 0.0))
             roc60 = row.get("roc_60d", row.get("roc_60", 0.0))
             k9 = row.get("k9", row.get("k_9", 50.0))
@@ -1981,6 +1996,8 @@ class WebDashboardGenerator:
             ud_vol = float(row.get("ud_vol_ratio", 1.0))
             prefix = "NT$" if is_tw else "$"
 
+            ret1d_color = "#34d399" if ret1d >= 0 else "#f87171"
+            ret1d_sign = "+" if ret1d >= 0 else ""
             roc20_color = "green" if roc20 >= 0 else "red"
             roc60_color = "green" if roc60 >= 0 else "red"
             badge_html = '<span class="badge badge-bull">站上50MA</span>' if above50 else '<span class="badge badge-bear">跌破50MA</span>'
@@ -2003,7 +2020,10 @@ class WebDashboardGenerator:
                     <span style="color: #64748b; font-size: 12px; margin-left: 4px; font-family: monospace;">{ticker}</span>
                     {micro_badges_html}
                 </td>
-                <td class="text-right font-mono" style="font-weight: bold;">{prefix}{price:,.2f}</td>
+                <td class="text-right font-mono" style="font-weight: bold;">
+                    <div>{prefix}{price:,.2f}</div>
+                    <div style="font-size: 11px; color: {ret1d_color}; font-weight: 500;">{ret1d_sign}{ret1d:.2f}%</div>
+                </td>
                 <td class="text-right font-mono {roc20_color}">{(('+' if roc20 >= 0 else '') + f'{roc20:.2f}%')}</td>
                 <td class="text-right font-mono desktop-only {roc60_color}">{(('+' if roc60 >= 0 else '') + f'{roc60:.2f}%')}</td>
                 <td class="text-right font-mono desktop-only" style="color: #38bdf8;">{k9:.1f} / {d9:.1f}</td>
@@ -2137,6 +2157,8 @@ class WebDashboardGenerator:
                 "symbol": ticker,
                 "is_tw": is_tw,
                 "price": curr_price,
+                "ret_1d": round(float(latest.get("ret_1d", 0.0)), 2) if not np.isnan(latest.get("ret_1d", 0.0)) else 0.0,
+                "chg_1d": round(float(latest.get("ret_1d", 0.0)), 2) if not np.isnan(latest.get("ret_1d", 0.0)) else 0.0,
                 "above_50sma": bool(latest["above_50sma"]),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_20": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,

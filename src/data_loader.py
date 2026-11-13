@@ -288,6 +288,15 @@ class TechDataLoader:
                     multi_level_index=False,
                     session=yf_session
                 )
+                if df is None or df.empty:
+                    df = yf.download(
+                        ticker,
+                        period="2y",
+                        progress=False,
+                        auto_adjust=True,
+                        multi_level_index=False,
+                        session=yf_session
+                    )
                 if df is not None and not df.empty:
                     break
             except Exception:
@@ -373,6 +382,10 @@ class TechDataLoader:
                     }], index=pd.DatetimeIndex([bar_dt], name="date"))
                     df = pd.concat([df, new_row])
                     df = self._clean_data_frame(df)
+
+        # 幽靈 / 盤中未收盤 K 棒精確過濾：若包含晚於市場收盤預期日之數據，予以截斷保護
+        if not df.empty and df.index[-1].date() > expected_date:
+            df = df[df.index.date <= expected_date]
 
         if df.empty or len(df) < min_rows:
             if os.path.exists(cache_file):

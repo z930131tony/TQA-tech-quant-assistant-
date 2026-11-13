@@ -59,14 +59,17 @@ def _compile_chip_evidence(tech_info: Dict) -> Dict:
     ud_vol_ratio = float(tech_info.get("ud_vol_ratio", 1.0))
     shakeout = bool(tech_info.get("is_shakeout_buy", False))
     dist_warn = bool(tech_info.get("is_distribution_warn", False))
+    dist_days = int(tech_info.get("dist_days_25d", 0))
+    is_burst = bool(tech_info.get("is_momentum_burst", False))
+    is_hammer = bool(tech_info.get("is_exhaustion_hammer", False))
 
     bull_ammo = []
     bear_ammo = []
 
-    # 1. 考夫曼效率係數 (KER 20)
-    if ker_20 >= 0.50:
+    # 1. 考夫曼效率係數 (KER 20)：僅當 ker_20 >= 0.45 時多頭才能引述為平滑鎖碼優勢
+    if ker_20 >= 0.45:
         bull_ammo.append(f"20日趨勢效率達 {ker_20:.2f}，價格沿均線平滑推升，屬機構演算法穩定鎖碼型態。")
-    elif ker_20 < 0.30:
+    elif ker_20 < 0.35:
         bear_ammo.append(f"20日趨勢效率僅 {ker_20:.2f}，走勢頻繁上下刷洗、雜訊過高，籌碼呈現凌亂分歧。")
 
     # 2. VCP 波動率壓縮比 (vcp_ratio & is_vcp_squeeze)
@@ -81,7 +84,15 @@ def _compile_chip_evidence(tech_info: Dict) -> Dict:
     elif ud_vol_ratio < 0.85:
         bear_ammo.append(f"20日上漲/下跌日量能比僅 {ud_vol_ratio:.2f} 倍，上攻無量而下跌出量，隱含主力逢高派發跡象。")
 
-    # 4. 量價極端訊號 (is_shakeout_buy / is_distribution_warn)
+    # 4. Stockbee 雙型態與 IBD 出貨日訊號
+    if is_burst:
+        bull_ammo.append("觸發 Stockbee 動能爆發突破（單日漲幅>=4%且量增>1.3x，強勢收高），主升段買點確立。")
+    if is_hammer:
+        bull_ammo.append("觸發 Stockbee 賣壓竭盡錘子線（波段回檔逾8%但爆量收長下影線），恐慌浮額清洗完畢。")
+    if dist_days >= 5:
+        bear_ammo.append(f"近 25 日密集出現 {dist_days} 次機構出貨日，主力籌碼派發警戒。")
+
+    # 5. 量價極端訊號 (is_shakeout_buy / is_distribution_warn)
     if shakeout:
         bull_ammo.append("觸發 10%~30% 階梯縮量洗盤買點，近3日均量低於月均量70%，賣壓竭盡。")
     if dist_warn:
@@ -140,7 +151,15 @@ def conduct_single_debate(
     if bull_ammo:
         bull_parts.extend(bull_ammo)
     else:
-        bull_parts.append(f"KER 趨勢平滑度 {ker_20:.2f}，走勢沿短期均線穩定推進。")
+        # 嚴禁在 ker_20 < 0.45 時拿 KER 硬誇！改為引用實際達標的均線位階、動能評分或量價結構
+        if ker_20 >= 0.45:
+            bull_parts.append(f"KER 趨勢平滑度 {ker_20:.2f}，走勢沿短期均線穩定推進。")
+        elif above_50:
+            bull_parts.append("股價站穩 50MA 生命線關鍵支撐，均線結構維持多頭排列。")
+        elif score >= 20.0:
+            bull_parts.append(f"多頭動能評分維持 {score:.1f}，具備波段動能跟隨機會。")
+        else:
+            bull_parts.append("短線處於區間震盪整理，靜待放量突破訊號。")
     fallback_bull = " ".join(bull_parts)
 
     # 空方論點
@@ -220,7 +239,7 @@ def conduct_single_debate(
 {chr(10).join(f'  • {h}' for h in news_headlines)}
 
 【角色任務與發言規範】
-1. Bullish Analyst（多頭動能狙擊手）：用 1-2 句話精準指出買進催化劑，必須明確引用 KER 趨勢平滑度、VCP 波動壓縮比 或 UD_Vol 機構量能比 之具體數值作為籌碼買進佐證。
+1. Bullish Analyst（多頭動能狙擊手）：用 1-2 句話精準指出買進催化劑，可引用 KER 趨勢平滑度、VCP 波動壓縮比 或 UD_Vol 機構量能比 之具體數值作為買進佐證。注意：只有當 ker_20 >= 0.45 時才可引用 KER 作為平滑推進論據；若 ker_20 < 0.45，嚴禁引述 KER 為利多，改為引用均線位階、動能分數或 VCP/量能比 等其他實際達標的優勢指標。
 2. Bearish Risk Auditor（空頭風控審計官）：用 1-2 句話精準反駁風險點，必須明確引用 VCP 波動比放大、UD_Vol 機構量能背離、出貨警訊 或 趨勢雜訊 之具體數值作為風控反駁佐證。
 3. Chief Judge（首席裁決官）：整合攻防，做出結構化決策，只能選擇以下 4 種 Verdict 之一：
    "STRONG_BUY" (強烈看多買進), "CAUTIOUS_BUY" (謹慎分批佈局), "CASH_DEFENSE" (現金防禦觀望), "SELL" (建議停損減碼)。
