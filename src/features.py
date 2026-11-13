@@ -61,7 +61,9 @@ class TechFeatureEngine:
         low = data["low"]
         volume = data["volume"]
         
-        # 1. 動能指標 (ROC - Rate of Change)
+        # 1. 動能指標 (ROC - Rate of Change) 與真實單日漲跌幅 (ret_1d)
+        data["ret_1d"] = close.pct_change(1) * 100
+        data["chg_1d"] = data["ret_1d"]
         data["roc_20"] = close.pct_change(config.short_momentum_window) * 100
         data["roc_60"] = close.pct_change(config.medium_momentum_window) * 100
         data["roc_120"] = close.pct_change(config.long_momentum_window) * 100
@@ -155,21 +157,45 @@ class TechFeatureEngine:
         down_vol = volume.where(delta < 0, 0.0).rolling(window=20).sum()
         data["ud_vol_ratio"] = (up_vol / (down_vol.replace(0, np.nan) + 1.0)).clip(upper=5.0).fillna(1.0)
 
-        # 10. 綜合動能評分 (基底 ROC 75% + 波動率調整夏普動能 15% + 趨勢平滑度與吸籌量能加成 - 出貨懲罰)
-        raw_roc_score = (
+        # 9F. IBD 機構出貨日計數 (Distribution Day Monitor)
+        # 當日跌幅 <= -0.2% 且當日成交量大於前一日成交量，視為機構出貨日
+        is_dist_day = ((daily_ret <= -0.002) & (volume > volume.shift(1))).astype(float)
+        data["is_dist_day"] = is_dist_day
+        data["dist_days_25d"] = is_dist_day.rolling(window=25, min_periods=1).sum().fillna(0.0)
+
+        # 9G. Stockbee 賣壓竭盡錘子線 (Exhaustion Hammer)
+        # 自 20 日高點回檔 >= 8%，下影線長且大於實體，量增 1.1 倍以上，代表恐慌賣壓竭盡
+        drawdown_20d = (close - data["high_20d"]) / data["high_20d"].replace(0, np.nan)
+        bar_range = (data["high"] - data["low"]).replace(0, np.nan)
+        lower_shadow = np.minimum(data["open"], close) - data["low"]
+        is_exhaustion_hammer = (
+            (drawdown_20d <= -0.08) &
+            (lower_shadow / bar_range >= 0.55) &
+            ((close - data["low"]) / bar_range >= 0.50) &
+            (volume >= data["vol_sma_20"] * 1.10)
+        ).fillna(False)
+        data["is_exhaustion_hammer"] = is_exhaustion_hammer
+
+        # 當觸發 Stockbee 賣壓竭盡錘子線時，代表機構低接換手完成，強制豁免 is_distribution_warn
+        data.loc[data["is_exhaustion_hammer"], "is_distribution_warn"] = False
+
+        # 9H. Stockbee 動能爆發突破 (Momentum Burst)
+        # 單日漲幅 >= 4%、成交量放大 1.3 倍以上、強勢收於全日高位 70% 之上且站穩 50MA
+        is_momentum_burst = (
+            (daily_ret >= 0.04) &
+            (volume >= data["vol_sma_20"] * 1.30) &
+            ((close - data["low"]) / bar_range >= 0.70) &
+            data["above_50sma"]
+        ).fillna(False)
+        data["is_momentum_burst"] = is_momentum_burst
+
+        # 10. 綜合動能評分 (純粹經典動能加權：ROC 20日 40% + 60日 35% + 120日 25%)
+        # 遵循奧卡姆剃刀原則：移除過度約束加減分，恢復高爆發力純動能排序，微結構指標僅作唯讀診斷展示
+        data["momentum_score"] = (
             data["roc_20"].fillna(0) * 0.40 +
             data["roc_60"].fillna(0) * 0.35 +
             data["roc_120"].fillna(0) * 0.25
         )
-        vol_mom_scaled = data["vol_adjusted_momentum"].fillna(0) * 25.0
-        base_momentum = raw_roc_score * 0.75 + vol_mom_scaled * 0.15
-
-        # 結合趨勢平滑度 (ker_20: 中心值約 0.35) 與機構量能比 (ud_vol_ratio: 中心值約 1.0)
-        ker_bonus = (data["ker_20"].fillna(0.35) - 0.35) * 8.0
-        ud_bonus = (data["ud_vol_ratio"].fillna(1.0) - 1.0) * 2.0
-        dist_penalty = np.where(data["is_distribution_warn"], 10.0, 0.0)
-
-        data["momentum_score"] = base_momentum + ker_bonus + ud_bonus - dist_penalty
         
         return data
 
@@ -188,12 +214,20 @@ class TechFeatureEngine:
             latest = enriched_df.iloc[-1]
             latest_date_str = enriched_df.index[-1].strftime("%Y-%m-%d")
             
-            # 判斷洗盤買點與出貨警訊文字
+            # 判斷洗盤買點、動能爆發與出貨警訊文字
             shakeout = bool(latest.get("is_shakeout_buy", False))
             dist_warn = bool(latest.get("is_distribution_warn", False))
             vcp_squeeze = bool(latest.get("is_vcp_squeeze", False))
+            is_burst = bool(latest.get("is_momentum_burst", False))
+            is_hammer = bool(latest.get("is_exhaustion_hammer", False))
+            dist_days_25 = int(latest.get("dist_days_25d", 0))
+
             signal_tag = "正常"
-            if dist_warn:
+            if is_burst:
+                signal_tag = "🚀 動能爆發突破"
+            elif is_hammer:
+                signal_tag = "🔨 賣壓竭盡反轉"
+            elif dist_warn:
                 signal_tag = "⚠️ 爆量出貨警戒"
             elif vcp_squeeze:
                 signal_tag = "🔥 VCP 突破蓄勢"
@@ -204,6 +238,8 @@ class TechFeatureEngine:
                 "ticker": ticker,
                 "name": TECH_UNIVERSE_TW.get(ticker, ticker),
                 "price": round(float(latest["close"]), 2),
+                "ret_1d": round(float(latest["ret_1d"]), 2) if not np.isnan(latest["ret_1d"]) else 0.0,
+                "chg_1d": round(float(latest["ret_1d"]), 2) if not np.isnan(latest["ret_1d"]) else 0.0,
                 "score": round(float(latest["momentum_score"]), 1),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
@@ -213,6 +249,9 @@ class TechFeatureEngine:
                 "vcp_ratio": round(float(latest["vcp_ratio"]), 2) if not np.isnan(latest["vcp_ratio"]) else 1.0,
                 "is_vcp_squeeze": vcp_squeeze,
                 "ud_vol_ratio": round(float(latest["ud_vol_ratio"]), 2) if not np.isnan(latest["ud_vol_ratio"]) else 1.0,
+                "dist_days_25d": dist_days_25,
+                "is_exhaustion_hammer": is_hammer,
+                "is_momentum_burst": is_burst,
                 "above_50sma": bool(latest["above_50sma"]),
                 "above_200sma": bool(latest["above_200sma"]),
                 "is_new_high": bool(latest["is_new_high_20d"]),

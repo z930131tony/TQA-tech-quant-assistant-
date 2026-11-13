@@ -149,11 +149,9 @@ class AutoTrader:
                 stopped_out_today.add(ticker)
                 is_emergency = True
 
-            # [第 3 優先] 爆量出貨警訊或跌破 50MA 中期生命線
+            # [第 3 優先] 跌破 50MA 中期生命線
             elif not is_above_50ma:
                 sell_reason = f"📉 跌破 50MA 生命線平倉 (現價 {prefix}{curr_price:,.2f} < 50MA {prefix}{pos['sma50']:,.2f})"
-            elif dist_warn:
-                sell_reason = f"⚠️ 觸發爆量出貨警訊 (is_distribution_warn == True) 避險平倉"
 
             if sell_reason:
                 # 緊急賣單設定向下讓價 1% 成交機制 (對齊 Tick)
@@ -197,7 +195,7 @@ class AutoTrader:
         # ----------------------------------------------------
         # 2A. 台股市場檢驗
         if target_market in ["ALL", "TW"]:
-            # 大盤濾網：0050.TW 站上均線且前 3 強至少 2 檔站上 50MA
+            # 大盤濾網：0050.TW 站上 50MA 且前 3 強至少 2 檔站上 50MA
             tw_top3_raw = tw_rank.head(3)
             tw_leaders_bull = (tw_top3_raw["above_50sma"].sum() >= 2) if not tw_top3_raw.empty else False
 
@@ -205,22 +203,19 @@ class AutoTrader:
             b_df = self.dataset.get("0050.TW")
             if b_df is not None and not b_df.empty:
                 b_c = float(b_df["close"].iloc[-1])
-                b_sma200 = float(b_df["close"].rolling(200).mean().iloc[-1]) if len(b_df) >= 200 else np.nan
                 b_sma50 = float(b_df["close"].rolling(50).mean().iloc[-1]) if len(b_df) >= 50 else b_c
-                b_sma = b_sma200 if not np.isnan(b_sma200) else b_sma50
-                tw_bench_bull = (b_c >= b_sma) if not np.isnan(b_sma) else True
+                tw_bench_bull = (b_c >= b_sma50)
 
             tw_market_bull = (tw_leaders_bull and tw_bench_bull)
 
-            # 動態倉位預算縮放 (Drawdown Scaling)
-            effective_budget_tw = self.base_budget_tw * scaling_factor
+            # 奧卡姆剃刀重構：解除底部減倉陷阱，維持 100% 原始預算
+            effective_budget_tw = self.base_budget_tw
 
             if tw_market_bull:
-                # 排除基準標的、爆量出貨警訊與當日停損標的
+                # 排除基準標的/ETF與當日停損標的
                 tw_candidates = tw_rank[
                     (tw_rank["above_50sma"] == True) &
-                    (tw_rank["is_distribution_warn"] == False) &
-                    (~tw_rank["ticker"].isin(["0050.TW", "QQQ"])) &
+                    (~tw_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
                     (~tw_rank["ticker"].isin(stopped_out_today))
                 ].head(5)
 
@@ -327,13 +322,13 @@ class AutoTrader:
                 us_bench_bull = (q_c >= q_sma200)
 
             us_market_bull = (us_leaders_bull and us_bench_bull)
-            effective_budget_us = self.base_budget_us * scaling_factor
+            # 奧卡姆剃刀重構：解除底部減倉陷阱，維持 100% 原始預算
+            effective_budget_us = self.base_budget_us
 
             if us_market_bull:
                 us_candidates = us_rank[
                     (us_rank["above_50sma"] == True) &
-                    (us_rank["is_distribution_warn"] == False) &
-                    (~us_rank["ticker"].isin(["QQQ", "0050.TW"])) &
+                    (~us_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
                     (~us_rank["ticker"].isin(stopped_out_today))
                 ].head(5)
 

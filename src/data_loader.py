@@ -30,28 +30,45 @@ class TechDataLoader:
                 self.curl_session = None
 
     @staticmethod
-    def get_taipei_now() -> datetime:
+    def get_taipei_now() -> pd.Timestamp:
         """取得當前台灣時區 (Asia/Taipei, UTC+8) 的時間"""
-        return datetime.now(timezone(timedelta(hours=8)))
+        return pd.Timestamp.now(tz="Asia/Taipei")
+
+    @classmethod
+    def get_expected_latest_close_date(cls, is_tw: bool) -> datetime.date:
+        """
+        市場最新應收盤日期計算 (Content-Date Aware)：
+        - 台股 (Asia/Taipei):
+          若平日在 13:35 (含) 之後，應收盤日即為當日；
+          若平日在 13:35 之前，應為前一交易日；
+          若週末 (週六/週日)，應為最近的週五。
+        - 美股 (America/New_York):
+          若美東時間平日在 16:10 (含) 之後，應收盤日即為當日；
+          若美東時間平日在 16:10 之前，應為前一交易日；
+          若週末 (週六/週日)，應為最近的週五。
+        """
+        if is_tw:
+            now_tw = pd.Timestamp.now(tz="Asia/Taipei")
+            if now_tw.weekday() < 5:
+                target = now_tw if (now_tw.hour, now_tw.minute) >= (13, 35) else (now_tw - timedelta(days=1))
+            else:
+                target = now_tw
+            while target.weekday() >= 5:
+                target -= timedelta(days=1)
+            return target.date()
+        else:
+            now_et = pd.Timestamp.now(tz="America/New_York")
+            if now_et.weekday() < 5:
+                target = now_et if (now_et.hour, now_et.minute) >= (16, 10) else (now_et - timedelta(days=1))
+            else:
+                target = now_et
+            while target.weekday() >= 5:
+                target -= timedelta(days=1)
+            return target.date()
 
     def get_expected_latest_trading_date(self, is_tw: bool) -> datetime.date:
-        """
-        依據市場收盤時間 (台灣時區) 計算目前預期應有的最新交易日
-        - 台股：平日 13:40 盤後完成更新
-        - 美股：台灣時間平日 06:00 (夏令 05:00) 盤後完成更新
-        """
-        now_tw = self.get_taipei_now()
-        if is_tw:
-            cutoff = now_tw.replace(hour=13, minute=40, second=0, microsecond=0)
-            target = now_tw if now_tw >= cutoff else (now_tw - timedelta(days=1))
-        else:
-            cutoff = now_tw.replace(hour=6, minute=0, second=0, microsecond=0)
-            target = (now_tw - timedelta(days=1)) if now_tw >= cutoff else (now_tw - timedelta(days=2))
-
-        # 若目標日為週末，往前推至週五 (週六 weekday=5, 週日 weekday=6)
-        while target.weekday() >= 5:
-            target -= timedelta(days=1)
-        return target.date()
+        """向下相容別名"""
+        return self.get_expected_latest_close_date(is_tw)
 
     def _clean_data_frame(self, df_in: Optional[pd.DataFrame]) -> pd.DataFrame:
         """
@@ -288,6 +305,15 @@ class TechDataLoader:
                     multi_level_index=False,
                     session=yf_session
                 )
+                if df is None or df.empty:
+                    df = yf.download(
+                        ticker,
+                        period="2y",
+                        progress=False,
+                        auto_adjust=True,
+                        multi_level_index=False,
+                        session=yf_session
+                    )
                 if df is not None and not df.empty:
                     break
             except Exception:
@@ -373,6 +399,10 @@ class TechDataLoader:
                     }], index=pd.DatetimeIndex([bar_dt], name="date"))
                     df = pd.concat([df, new_row])
                     df = self._clean_data_frame(df)
+
+        # 幽靈 / 盤中未收盤 K 棒精確過濾：若包含晚於市場收盤預期日之數據，予以截斷保護
+        if not df.empty and df.index[-1].date() > expected_date:
+            df = df[df.index.date <= expected_date]
 
         if df.empty or len(df) < min_rows:
             if os.path.exists(cache_file):

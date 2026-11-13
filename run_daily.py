@@ -33,6 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description="TQA 定時運算與推播")
     parser.add_argument("--market", choices=["TW", "US", "AUTO"], default="AUTO")
     parser.add_argument("--skip-data", action="store_true", help="使用本機快取數據，略過網路下載")
+    parser.add_argument("--force", "--force-refresh", dest="force_refresh", action="store_true", help="強制重新下載最新市場數據，忽略快取")
     args = parser.parse_args()
 
     target_market = args.market
@@ -43,9 +44,9 @@ def main():
     print(f"啟動 TQA 定時排程 (目標市場: {target_market})...")
     print("=" * 50)
 
-    # 1. 抓取數據
+    # 1. 抓取數據 (支援 --force 強制更新)
     loader = TechDataLoader()
-    dataset = loader.fetch_all_tech_data(cache_only=args.skip_data)
+    dataset = loader.fetch_all_tech_data(force_refresh=args.force_refresh, cache_only=args.skip_data)
 
     # 2. 計算特徵與最新天梯
     tw_rank, us_rank = TechFeatureEngine.evaluate_latest_ranking(dataset)

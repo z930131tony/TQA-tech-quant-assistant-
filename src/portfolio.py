@@ -24,19 +24,9 @@ class PortfolioTracker:
     @classmethod
     def calculate_risk_scaling_factor(cls, drawdown_pct: float, current_factor: float = 1.0) -> float:
         """
-        帳戶層級動態倉位縮放係數 (Portfolio Drawdown Scaling):
-        - 回撤 >= 25.0%: 降為 0.25 (極致防禦，保留 75% 現金)
-        - 回撤 >= 18.0%: 降為 0.50 (半倉防禦，保留 50% 現金)
-        - 回撤 < 10.0%: 恢復 1.00 (多頭常態)
-        - 10.0% ~ 18.0%: 維持既有狀態 (具備滯後緩衝 Hysteresis，避免在邊界頻繁抖動)
+        帳戶層級動態倉位縮放係數 (奧卡姆剃刀重構：解除底部減倉陷阱，常態維持 1.0 全倉進出)
         """
-        if drawdown_pct >= 25.0:
-            return 0.25
-        elif drawdown_pct >= 18.0:
-            return 0.50
-        elif drawdown_pct < 10.0:
-            return 1.0
-        return current_factor
+        return 1.0
 
     @classmethod
     def load_portfolio_state(cls, filepath: str = PORTFOLIO_FILE) -> Dict[str, Any]:

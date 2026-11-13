@@ -4,9 +4,13 @@
 # 排除生成之靜態儀表板與大體積數據，不計入 GitHub 語言統計 (讓專案正確識別為 100% Python)
 *.html linguist-vendored
 *.html linguist-generated
+*.html -linguist-detectable
+*.html linguist-detectable=false
 *.html -diff
 index.html linguist-vendored
 index.html linguist-generated
+index.html -linguist-detectable
+index.html linguist-detectable=false
 index.html -diff
 
 data_cache/** linguist-vendored
