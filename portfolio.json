@@ -5,7 +5,7 @@
       "shares": 2.0,
       "cost_price": 348.51,
       "entry_date": "2026-11-11",
-      "peak_price": 359.368408203125
+      "peak_price": 359.3699951171875
     },
     {
       "ticker": "MSFT",
@@ -30,8 +30,8 @@
     }
   ],
   "peak_equity": 114921.2,
-  "current_drawdown_pct": 1.3,
+  "current_drawdown_pct": 0.0,
   "risk_scaling_factor": 1.0,
   "cash": 30000.0,
-  "last_updated": "2026-11-13 20:30:00"
+  "last_updated": "2026-11-13 14:47:59"
 }
