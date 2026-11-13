@@ -31,7 +31,7 @@ class TechBacktester:
         start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
         end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
         execution_mode: str = "next_open", # 預設為 "next_open" (隔日開盤成交，消除收盤偷價偏差)
-        turnover_buffer: bool = True       # 啟用換股動能差緩衝 (避免微小分差換股白繳證交稅)
+        turnover_buffer: bool = False      # 奧卡姆剃刀：關閉換股緩衝，讓強勢動能領頭羊全速進場
     ):
         self.dataset = dataset
         self.initial_capital = initial_capital
@@ -228,18 +228,15 @@ class TechBacktester:
             # B. 週期性調倉 (Rebalancing)
             if day_idx % self.rebalance_freq == 0:
                 candidates = []
+                exclude_tickers = ["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"]
                 for ticker, df in filtered_data.items():
-                    # 排除基準指數 ETF 混入個股選股池
-                    if ticker in ["0050.TW", "QQQ"]:
+                    # 排除基準指數與產業 ETF 混入個股選股池
+                    if ticker in exclude_tickers:
                         continue
                     if ticker in stopped_out_today:
                         continue
                     if current_date in df.index:
                         row = df.loc[current_date]
-                        # 接入量價訊號：若觸發爆量出貨警訊，當期剔除候選
-                        if bool(row.get("is_distribution_warn", False)):
-                            continue
-
                         score = float(row["momentum_score"]) if not np.isnan(row["momentum_score"]) else -999.0
                         above_50 = bool(row["above_50sma"])
                         
@@ -255,7 +252,7 @@ class TechBacktester:
                 if market == "TW":
                     all_scores = []
                     for t, d in filtered_data.items():
-                        if t in ["0050.TW", "QQQ"]:
+                        if t in exclude_tickers:
                             continue
                         if current_date in d.index:
                             r = d.loc[current_date]
@@ -269,16 +266,14 @@ class TechBacktester:
                     b_df = filtered_data.get("0050.TW", self.dataset.get("0050.TW"))
                     if b_df is not None and current_date in b_df.index:
                         b_c = float(b_df.loc[current_date, "close"])
-                        b_sma200 = float(b_df.loc[current_date, "sma_200"]) if "sma_200" in b_df.columns else float(b_df["close"].rolling(200).mean().loc[current_date])
                         b_sma50 = float(b_df.loc[current_date, "sma_50"]) if "sma_50" in b_df.columns else float(b_df["close"].rolling(50).mean().loc[current_date])
-                        sma = b_sma200 if not np.isnan(b_sma200) else b_sma50
-                        tw_bench_bull = (b_c >= sma) if not np.isnan(sma) else True
+                        tw_bench_bull = (b_c >= b_sma50) if not np.isnan(b_sma50) else True
 
                     is_market_bull = (tw_leaders_bull and tw_bench_bull)
                 elif market == "US":
                     all_scores = []
                     for t, d in filtered_data.items():
-                        if t in ["0050.TW", "QQQ"]:
+                        if t in exclude_tickers:
                             continue
                         if current_date in d.index:
                             r = d.loc[current_date]
@@ -301,7 +296,7 @@ class TechBacktester:
                     target_tickers = []
                     top_targets = []
                 else:
-                    # 調倉選股目標判定 (台股啟用換股動能差緩衝 Buffer，避免微幅分差頻繁換股白繳證交稅)
+                    # 調倉選股目標判定
                     if self.turnover_buffer and market == "TW":
                         cand_map = {c[0]: c for c in candidates}
                         held_in_buffer = [t for t in holdings.keys() if t in [c[0] for c in candidates[:self.top_n + 1]]]
@@ -316,10 +311,7 @@ class TechBacktester:
                         top_targets = candidates[:self.top_n]
                         target_tickers = [x[0] for x in top_targets]
 
-                # 帳戶總淨值動態降倉保護 (Portfolio-Level Drawdown Scaling)
-                # 當帳戶總回撤達 18% 時，自動將最大持倉比例降為原本的 50% (保留 50% 現金緩衝)
-                scale_mult = 0.5 if portfolio_dd >= 0.18 else 1.0
-                
+                # 奧卡姆剃刀：徹底移除底部減倉陷阱，全速 100% 資金滿額投入領頭羊
                 if self.execution_mode == "next_open":
                     for ticker in list(holdings.keys()):
                         if ticker not in target_tickers and ticker not in [x[0] for x in pending_sells]:
@@ -334,7 +326,7 @@ class TechBacktester:
                                 p_sub = df.loc[df.index <= current_date, "close"]
                                 if not p_sub.empty:
                                     equity += s * float(p_sub.iloc[-1])
-                        target_alloc = (equity * scale_mult) / self.top_n
+                        target_alloc = equity / self.top_n
                         for ticker, score, _ in top_targets:
                             if ticker not in [x[0] for x in pending_sells]:
                                 pending_buys.append((ticker, target_alloc, score))
@@ -375,7 +367,7 @@ class TechBacktester:
                                 if not p_sub.empty:
                                     equity += s * float(p_sub.iloc[-1])
                         
-                        target_alloc_per_ticker = (equity * scale_mult) / self.top_n
+                        target_alloc_per_ticker = equity / self.top_n
                         for ticker, score, curr_price in top_targets:
                             current_shares = holdings.get(ticker, 0.0)
                             current_val = current_shares * curr_price

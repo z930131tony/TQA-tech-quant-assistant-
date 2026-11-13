@@ -299,13 +299,11 @@ except Exception as e:
 # -------------------------------------------------------------
 print("\n[測試 9/9] 驗證實盤雙軌停損 (-30% 硬停損 / -8% 移動停損) 與帳戶回撤減倉 (Drawdown Scaling)...")
 try:
-    # 1. 數學斷言：動態倉位縮放係數 (Hysteresis & Scaling)
-    sf_normal = PortfolioTracker.calculate_risk_scaling_factor(5.0)    # < 10%
-    sf_dd18 = PortfolioTracker.calculate_risk_scaling_factor(20.0)     # >= 18%
-    sf_dd25 = PortfolioTracker.calculate_risk_scaling_factor(26.0)     # >= 25%
-    assert sf_normal == 1.0, f"預期 1.0，得到 {sf_normal}"
-    assert sf_dd18 == 0.50, f"預期 0.50，得到 {sf_dd18}"
-    assert sf_dd25 == 0.25, f"預期 0.25，得到 {sf_dd25}"
+    # 1. 數學斷言：動態倉位縮放係數 (奧卡姆剃刀重構：解除底部減倉陷阱，常態維持 1.0 全倉進出)
+    sf_normal = PortfolioTracker.calculate_risk_scaling_factor(5.0)
+    sf_dd18 = PortfolioTracker.calculate_risk_scaling_factor(20.0)
+    sf_dd25 = PortfolioTracker.calculate_risk_scaling_factor(26.0)
+    assert sf_normal == 1.0 and sf_dd18 == 1.0 and sf_dd25 == 1.0, "縮放係數必須維持 1.0"
 
     # 2. 數學斷言：模擬持倉 -31% 觸發戰術絕對硬停損與 -9% 移動停損
     dates = pd.date_range("2026-01-01", periods=60, freq="B")

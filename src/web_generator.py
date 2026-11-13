@@ -2176,7 +2176,6 @@ class WebDashboardGenerator:
                 "is_vcp_squeeze": bool(latest.get("is_vcp_squeeze", False)),
                 "ud_vol_ratio": round(float(latest.get("ud_vol_ratio", 1.0)), 2) if not np.isnan(latest.get("ud_vol_ratio", 1.0)) else 1.0,
                 "candles": candles,
-                "bars": candles,
                 "sma20": sma20_list,
                 "sma50": sma50_list,
                 "kd_k": kd_k_list,

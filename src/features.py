@@ -189,28 +189,12 @@ class TechFeatureEngine:
         ).fillna(False)
         data["is_momentum_burst"] = is_momentum_burst
 
-        # 10. 綜合動能評分 (基底 ROC 75% + 波動率調整夏普動能 15% + 趨勢平滑度與吸籌量能加成 - 出貨懲罰)
-        raw_roc_score = (
+        # 10. 綜合動能評分 (純粹經典動能加權：ROC 20日 40% + 60日 35% + 120日 25%)
+        # 遵循奧卡姆剃刀原則：移除過度約束加減分，恢復高爆發力純動能排序，微結構指標僅作唯讀診斷展示
+        data["momentum_score"] = (
             data["roc_20"].fillna(0) * 0.40 +
             data["roc_60"].fillna(0) * 0.35 +
             data["roc_120"].fillna(0) * 0.25
-        )
-        vol_mom_scaled = data["vol_adjusted_momentum"].fillna(0) * 25.0
-        base_momentum = raw_roc_score * 0.75 + vol_mom_scaled * 0.15
-
-        # 結合趨勢平滑度 (ker_20: 中心值約 0.35) 與機構量能比 (ud_vol_ratio: 中心值約 1.0)
-        ker_bonus = (data["ker_20"].fillna(0.35) - 0.35) * 8.0
-        ud_bonus = (data["ud_vol_ratio"].fillna(1.0) - 1.0) * 2.0
-        dist_penalty = np.where(data["is_distribution_warn"], 10.0, 0.0)
-
-        # Stockbee 爆發/竭盡型態加成與 IBD 密集出貨懲罰
-        burst_bonus = np.where(data["is_momentum_burst"], 5.0, 0.0)
-        hammer_bonus = np.where(data["is_exhaustion_hammer"], 3.0, 0.0)
-        dist_cluster_penalty = np.where(data["dist_days_25d"] >= 5, 5.0, 0.0)
-
-        data["momentum_score"] = (
-            base_momentum + ker_bonus + ud_bonus + burst_bonus + hammer_bonus 
-            - dist_penalty - dist_cluster_penalty
         )
         
         return data
