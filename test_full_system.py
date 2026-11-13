@@ -227,18 +227,22 @@ try:
         has_numba_kd = ("k_9" in feats.columns and "d_9" in feats.columns)
         has_vol_mom = ("vol_adjusted_momentum" in feats.columns and "vol_adj_roc_20" in feats.columns)
         has_volume_signals = ("is_shakeout_buy" in feats.columns and "is_distribution_warn" in feats.columns)
+        has_microstructure = all(c in feats.columns for c in ["ker_20", "vcp_ratio", "is_vcp_squeeze", "ud_vol_ratio"])
         
         kd_val = float(feats["k_9"].iloc[-1])
         vol_mom_val = float(feats["vol_adjusted_momentum"].iloc[-1])
         shakeout_count = int(feats["is_shakeout_buy"].sum())
         dist_count = int(feats["is_distribution_warn"].sum())
+        vcp_count = int(feats["is_vcp_squeeze"].sum())
+        ker_val = float(feats["ker_20"].iloc[-1])
 
         print(f"  ✅ Numba 加速 KD 計算: K={kd_val:.1f}, D={float(feats['d_9'].iloc[-1]):.1f}")
         print(f"  ✅ 夏普波動率調整動能: {vol_mom_val:.2f}")
         print(f"  ✅ 階梯縮量洗盤訊號 (is_shakeout_buy) 總計: {shakeout_count} 次")
         print(f"  ✅ 爆量出貨警訊 (is_distribution_warn) 總計: {dist_count} 次")
+        print(f"  ✅ VCP 波動率收斂壓縮 (is_vcp_squeeze) 總計: {vcp_count} 次，最新 KER: {ker_val:.2f}")
 
-        results["Numba量價特徵工程"] = (has_numba_kd and has_vol_mom and has_volume_signals)
+        results["Numba量價特徵工程"] = (has_numba_kd and has_vol_mom and has_volume_signals and has_microstructure)
     else:
         results["Numba量價特徵工程"] = False
 except Exception as e:
@@ -253,13 +257,17 @@ try:
     from src.ai_debate import conduct_single_debate, fetch_yahoo_news
     from src.trader import SHIOAJI_AVAILABLE
 
-    # 1. 測試在無 API Key 下，AI 辯論模組優雅降級為量化規則合成
+    # 1. 測試在無 API Key 下，AI 辯論模組優雅降級為量化規則合成 (含三大價量籌碼因子)
     fake_tech = {
         "price": 1050.0,
         "score": 85.0,
         "above_50sma": True,
         "is_shakeout_buy": True,
-        "is_distribution_warn": False
+        "is_distribution_warn": False,
+        "ker_20": 0.58,
+        "vcp_ratio": 0.72,
+        "is_vcp_squeeze": True,
+        "ud_vol_ratio": 1.35
     }
     debate_res = conduct_single_debate(
         ticker="2330.TW",
@@ -270,18 +278,120 @@ try:
         api_key=None
     )
     fallback_ok = (debate_res.get("verdict") == "STRONG_BUY" and debate_res.get("step_buy_10pct_price") == 945.0)
+    has_chip_metrics = "chip_metrics" in debate_res and debate_res["chip_metrics"].get("ker_20") == 0.58
+    has_chip_in_bull = any(k in debate_res.get("bull_summary", "") for k in ["趨勢效率", "洗盤", "VCP", "吃貨", "量能比"])
 
     # 2. 測試 Shioaji 動態導入 (不論環境有無安裝皆能安全運作)
     trader_obj = AutoTrader(dataset=dataset)
     shioaji_safe = hasattr(trader_obj, "execute_semi_auto_order") and hasattr(trader_obj, "sync_shioaji_positions")
 
     print(f"  ✅ AI 多空辯論引擎無 Key 降級保護: {fallback_ok} (Verdict: {debate_res.get('verdict')})")
+    print(f"  ✅ 語意化籌碼因子注入: {has_chip_metrics and has_chip_in_bull}")
     print(f"  ✅ 永豐 Shioaji 動態相容性 (本機安裝狀態: {SHIOAJI_AVAILABLE}): {shioaji_safe}")
 
-    results["AI辯論與Shioaji防護"] = (fallback_ok and shioaji_safe)
+    results["AI辯論與Shioaji防護"] = (fallback_ok and shioaji_safe and has_chip_metrics and has_chip_in_bull)
 except Exception as e:
     print(f"  ❌ AI 與下單相容測試異常: {e}")
     results["AI辯論與Shioaji防護"] = False
+
+# -------------------------------------------------------------
+# 測試 9: 實盤雙軌風控 (-30% 硬停損 / -8% 移動停損) 與帳戶回撤動態減倉
+# -------------------------------------------------------------
+print("\n[測試 9/9] 驗證實盤雙軌停損 (-30% 硬停損 / -8% 移動停損) 與帳戶回撤減倉 (Drawdown Scaling)...")
+try:
+    # 1. 數學斷言：動態倉位縮放係數 (Hysteresis & Scaling)
+    sf_normal = PortfolioTracker.calculate_risk_scaling_factor(5.0)    # < 10%
+    sf_dd18 = PortfolioTracker.calculate_risk_scaling_factor(20.0)     # >= 18%
+    sf_dd25 = PortfolioTracker.calculate_risk_scaling_factor(26.0)     # >= 25%
+    assert sf_normal == 1.0, f"預期 1.0，得到 {sf_normal}"
+    assert sf_dd18 == 0.50, f"預期 0.50，得到 {sf_dd18}"
+    assert sf_dd25 == 0.25, f"預期 0.25，得到 {sf_dd25}"
+
+    # 2. 數學斷言：模擬持倉 -31% 觸發戰術絕對硬停損與 -9% 移動停損
+    dates = pd.date_range("2026-01-01", periods=60, freq="B")
+    mock_df_loss = pd.DataFrame({
+        "open": [100.0] * 59 + [69.0],
+        "high": [102.0] * 59 + [70.0],
+        "low": [98.0] * 59 + [68.0],
+        "close": [100.0] * 59 + [69.0],
+        "volume": [1000000] * 60
+    }, index=dates)
+
+    mock_df_trail = pd.DataFrame({
+        "open": [100.0] * 30 + [120.0] * 20 + [109.0] * 10,
+        "high": [102.0] * 30 + [125.0] * 20 + [110.0] * 10,
+        "low": [98.0] * 30 + [118.0] * 20 + [108.0] * 10,
+        "close": [100.0] * 30 + [120.0] * 20 + [109.0] * 10,
+        "volume": [1000000] * 60
+    }, index=dates)
+
+    mock_dataset = {
+        "TEST_LOSS.TW": mock_df_loss,
+        "TEST_TRAIL.TW": mock_df_trail,
+        "0050.TW": mock_df_loss.copy()
+    }
+
+    test_positions = [
+        {
+            "ticker": "TEST_LOSS.TW",
+            "shares": 100,
+            "cost_price": 100.0,
+            "entry_date": "2026-01-02",
+            "peak_price": 102.0
+        },
+        {
+            "ticker": "TEST_TRAIL.TW",
+            "shares": 100,
+            "cost_price": 100.0,
+            "entry_date": "2026-01-02",
+            "peak_price": 125.0
+        }
+    ]
+
+    PortfolioTracker.save_portfolio(test_positions, extra_state={"cash": 50000.0, "peak_equity": 100000.0})
+    eval_res = PortfolioTracker.evaluate_portfolio(mock_dataset, save_state=False)
+
+    loss_item = next(p for p in eval_res if p["ticker"] == "TEST_LOSS.TW")
+    trail_item = next(p for p in eval_res if p["ticker"] == "TEST_TRAIL.TW")
+
+    assert loss_item["hard_stop_triggered"] is True, "TEST_LOSS.TW 虧損 31% 必須觸發 hard_stop_triggered"
+    assert "戰術絕對硬停損" in loss_item["alert_text"]
+    assert trail_item["trailing_stop_triggered"] is True, "TEST_TRAIL.TW 自高點回檔 12.8% 必須觸發 trailing_stop_triggered"
+    assert "移動停損平倉" in trail_item["alert_text"]
+
+    # 3. 測試 AutoTrader 產生賣出訂單與讓價保護
+    dummy_rank = pd.DataFrame([{
+        "ticker": "TEST_BUY.TW",
+        "name": "測試強勢股",
+        "price": 100.0,
+        "score": 95.0,
+        "above_50sma": True,
+        "is_distribution_warn": False
+    }])
+    trader_test = AutoTrader(dataset=mock_dataset, budget_per_stock_tw=30000.0)
+    orders, state_out, logs_out = trader_test.generate_trade_orders(dummy_rank, pd.DataFrame(), target_market="TW")
+
+    sell_orders = [o for o in orders if o["action"] == "SELL"]
+    assert any(o["ticker"] == "TEST_LOSS.TW" and "戰術絕對硬停損" in o["reason"] for o in sell_orders), "必須產生硬停損賣單"
+    assert any(o["ticker"] == "TEST_TRAIL.TW" and "移動停損平倉" in o["reason"] for o in sell_orders), "必須產生移動停損賣單"
+
+    loss_order = next(o for o in sell_orders if o["ticker"] == "TEST_LOSS.TW")
+    assert loss_order["is_emergency"] is True
+    assert loss_order["price"] < loss_order["market_price"], "緊急賣單限價必須低於現價以確保撮合"
+
+    print(f"  ✅ 倉位縮放係數斷言: 回撤5%={sf_normal:.2f}x, 回撤20%={sf_dd18:.2f}x, 回撤26%={sf_dd25:.2f}x")
+    print(f"  ✅ -31% 戰術絕對硬停損斷言: 100% 觸發全數賣出並加入禁買")
+    print(f"  ✅ -9% 移動停損平倉斷言: 100% 觸發高點回檔賣出")
+    print(f"  ✅ 讓價撮合機制斷言: 限價 NT${loss_order['price']:.2f} < 市價 NT${loss_order['market_price']:.2f} (成功向下讓價)")
+
+    results["實盤雙軌風控與回撤縮放"] = True
+except Exception as e:
+    print(f"  ❌ 風控測試異常: {e}")
+    results["實盤雙軌風控與回撤縮放"] = False
+finally:
+    if backup_portfolio:
+        with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+            f.write(backup_portfolio)
 
 # -------------------------------------------------------------
 # 綜合測試匯總報告
@@ -297,7 +407,7 @@ for name, ok in results.items():
 
 print("-" * 70)
 if all_ok:
-    print("🎉 恭喜！全系統 8 大模組自主測試 100% 全數通過，無任何潛在漏洞！")
+    print("🎉 恭喜！全系統 9 大模組自主測試 100% 全數通過，無任何潛在漏洞！")
 else:
     print("⚠️ 警告：部分模組測試未通過，請查看上方詳細日誌。")
 print("======================================================================\n")

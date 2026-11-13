@@ -1,5 +1,5 @@
 """
-行情數據下載與標準化模組 (強化版：curl_cffi 瀏覽器指紋偽裝 + 指數退避重試 + 單標的故障隔離 + 免費多源備援)
+行情數據下載與標準化模組 (強化版：時區精確校驗 + 智慧快取過期 + TWSE/FinMind備援補齊 + 橫截面前向填補)
 """
 import time
 import random
@@ -29,6 +29,30 @@ class TechDataLoader:
             except Exception:
                 self.curl_session = None
 
+    @staticmethod
+    def get_taipei_now() -> datetime:
+        """取得當前台灣時區 (Asia/Taipei, UTC+8) 的時間"""
+        return datetime.now(timezone(timedelta(hours=8)))
+
+    def get_expected_latest_trading_date(self, is_tw: bool) -> datetime.date:
+        """
+        依據市場收盤時間 (台灣時區) 計算目前預期應有的最新交易日
+        - 台股：平日 13:40 盤後完成更新
+        - 美股：台灣時間平日 06:00 (夏令 05:00) 盤後完成更新
+        """
+        now_tw = self.get_taipei_now()
+        if is_tw:
+            cutoff = now_tw.replace(hour=13, minute=40, second=0, microsecond=0)
+            target = now_tw if now_tw >= cutoff else (now_tw - timedelta(days=1))
+        else:
+            cutoff = now_tw.replace(hour=6, minute=0, second=0, microsecond=0)
+            target = (now_tw - timedelta(days=1)) if now_tw >= cutoff else (now_tw - timedelta(days=2))
+
+        # 若目標日為週末，往前推至週五 (週六 weekday=5, 週日 weekday=6)
+        while target.weekday() >= 5:
+            target -= timedelta(days=1)
+        return target.date()
+
     def _clean_data_frame(self, df_in: Optional[pd.DataFrame]) -> pd.DataFrame:
         """
         標準化資料清理函式：
@@ -57,174 +81,178 @@ class TechDataLoader:
             min_rows = max(120, int(lookback * 0.45))
         else:
             min_rows = min(30, max(5, lookback // 3))
-        start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
         
+        now_tw = self.get_taipei_now()
+        start_date = (now_tw - timedelta(days=lookback)).strftime("%Y-%m-%d")
         url = "https://api.finmindtrade.com/api/v4/data"
         params = {
             "dataset": "TaiwanStockPrice",
             "data_id": clean_id,
             "start_date": start_date
         }
-        
+
         for attempt in range(3):
             try:
-                resp = requests.get(url, params=params, timeout=12)
-                if resp.status_code != 200:
-                    time.sleep(1.0 + attempt * 1.5)
-                    continue
-                raw_data = resp.json().get("data", [])
-                if not raw_data or len(raw_data) < min_rows:
-                    return None
-                    
-                df = pd.DataFrame(raw_data)
-                df = df.rename(columns={
-                    "date": "date",
-                    "open": "open",
-                    "max": "high",
-                    "min": "low",
-                    "close": "close",
-                    "Trading_Volume": "volume"
-                })
-                df["date"] = pd.to_datetime(df["date"])
-                df = df.set_index("date")
-                df["symbol"] = ticker
-                
-                df = self._clean_data_frame(df)
-                if df.empty or len(df) < min_rows:
-                    return None
-                return df
+                res = requests.get(url, params=params, timeout=12)
+                if res.status_code == 200:
+                    data = res.json()
+                    if data.get("msg") == "success" and data.get("data"):
+                        df = pd.DataFrame(data["data"])
+                        if "date" in df.columns:
+                            df["date"] = pd.to_datetime(df["date"])
+                            df = df.set_index("date")
+                            df = df.rename(columns={
+                                "open": "open",
+                                "max": "high",
+                                "min": "low",
+                                "close": "close",
+                                "Trading_Volume": "volume"
+                            })
+                            df["symbol"] = ticker
+                            df = self._clean_data_frame(df)
+                            if len(df) >= min_rows:
+                                return df
+                time.sleep((2 ** attempt) + random.uniform(0.5, 1.0))
             except Exception:
-                if attempt < 2:
-                    time.sleep(1.5 * (attempt + 1))
+                time.sleep((2 ** attempt) + random.uniform(0.5, 1.0))
         return None
 
-    def fetch_twse_openapi_latest(self) -> Dict[str, Dict]:
+    def fetch_twse_openapi_latest(self) -> Dict[str, dict]:
         """
-        備援：從臺灣證券交易所 OpenAPI 抓取所有上市公司當日最新收盤行情
+        透過台灣證券交易所 OpenAPI 取得台股全市場當日收盤即時報價 (免費免金鑰官方備援)
         """
         url = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
         try:
-            resp = requests.get(url, timeout=10)
-            if resp.status_code != 200:
-                return {}
-            data = resp.json()
-            result = {}
-            for row in data:
-                code = row.get("Code", "").strip()
-                if not code:
-                    continue
-                try:
-                    # 轉換民國年為西元年 '1151111' -> '2026-11-11'
-                    raw_d = str(row.get("Date", "")).strip()
-                    if len(raw_d) >= 7:
-                        y = int(raw_d[:-4]) + 1911
-                        m = int(raw_d[-4:-2])
-                        d = int(raw_d[-2:])
-                        dt = datetime(y, m, d)
-                    else:
-                        dt = datetime.now()
-                    
-                    c_px = float(str(row.get("ClosingPrice", "0")).replace(",", ""))
-                    o_px = float(str(row.get("OpeningPrice", "0")).replace(",", ""))
-                    h_px = float(str(row.get("HighestPrice", "0")).replace(",", ""))
-                    l_px = float(str(row.get("LowestPrice", "0")).replace(",", ""))
-                    vol = float(str(row.get("TradeVolume", "0")).replace(",", ""))
-                    if c_px > 0 and vol > 0:
-                        result[code] = {
-                            "date": dt,
-                            "open": o_px if o_px > 0 else c_px,
-                            "high": h_px if h_px > 0 else c_px,
-                            "low": l_px if l_px > 0 else c_px,
-                            "close": c_px,
-                            "volume": vol
-                        }
-                except Exception:
-                    continue
-            return result
-        except Exception:
-            return {}
-
-    def fetch_stooq_fallback(self, ticker: str, days: int = 100) -> Optional[pd.DataFrame]:
-        """
-        備援：美股從 Stooq 抓取日 K 線 (當 yfinance 受阻時的第三層備援)
-        """
-        clean_sym = ticker.replace("-", ".").lower()
-        url = f"https://stooq.com/q/d/l/?s={clean_sym}.us&i=d"
-        try:
-            req_func = self.curl_session.get if self.curl_session else requests.get
-            resp = req_func(url, timeout=10)
-            if resp.status_code == 200 and "Date" in resp.text and "<html" not in resp.text:
-                import io
-                df = pd.read_csv(io.StringIO(resp.text))
-                if not df.empty and {"Date", "Open", "High", "Low", "Close", "Volume"}.issubset(df.columns):
-                    df = df.rename(columns={
-                        "Date": "date", "Open": "open", "High": "high",
-                        "Low": "low", "Close": "close", "Volume": "volume"
-                    })
-                    df["date"] = pd.to_datetime(df["date"])
-                    df = df.set_index("date").sort_index()
-                    df["symbol"] = ticker
-                    return self._clean_data_frame(df)
+            res = requests.get(url, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                mapping = {}
+                for item in data:
+                    code = item.get("Code", "").strip()
+                    try:
+                        c_val = float(item.get("ClosingPrice", "0").replace(",", ""))
+                        o_val = float(item.get("OpeningPrice", "0").replace(",", ""))
+                        h_val = float(item.get("HighestPrice", "0").replace(",", ""))
+                        l_val = float(item.get("LowestPrice", "0").replace(",", ""))
+                        v_val = float(item.get("TradeVolume", "0").replace(",", ""))
+                        if c_val > 0:
+                            mapping[code] = {
+                                "open": o_val if o_val > 0 else c_val,
+                                "high": h_val if h_val > 0 else c_val,
+                                "low": l_val if l_val > 0 else c_val,
+                                "close": c_val,
+                                "volume": v_val
+                            }
+                    except Exception:
+                        continue
+                return mapping
         except Exception:
             pass
+        return {}
+
+    def fetch_stooq_fallback(self, ticker: str, days: Optional[int] = None) -> Optional[pd.DataFrame]:
+        """
+        美股 Stooq 開放行情下載備援 (免金鑰)
+        """
+        clean_ticker = ticker.lower()
+        if not clean_ticker.endswith(".us"):
+            clean_ticker = f"{clean_ticker}.us"
+        url = f"https://stooq.com/q/d/l/?s={clean_ticker}&i=d"
+
+        lookback = days if days else config.lookback_days
+        min_rows = max(120, int(lookback * 0.45)) if lookback >= 365 else min(30, max(5, lookback // 3))
+        
+        now_tw = self.get_taipei_now()
+        start_date = (now_tw - timedelta(days=lookback)).strftime("%Y-%m-%d")
+
+        for attempt in range(3):
+            try:
+                res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+                if res.status_code == 200 and "Date" in res.text:
+                    import io
+                    df = pd.read_csv(io.StringIO(res.text))
+                    if not df.empty and "Date" in df.columns and "Close" in df.columns:
+                        df["Date"] = pd.to_datetime(df["Date"])
+                        df = df.set_index("Date").sort_index()
+                        df = df.rename(columns={
+                            "Open": "open",
+                            "High": "high",
+                            "Low": "low",
+                            "Close": "close",
+                            "Volume": "volume"
+                        })
+                        df = df[df.index >= start_date]
+                        df["symbol"] = ticker
+                        df = self._clean_data_frame(df)
+                        if len(df) >= min_rows:
+                            return df
+                time.sleep((2 ** attempt) + random.uniform(0.5, 1.0))
+            except Exception:
+                time.sleep((2 ** attempt) + random.uniform(0.5, 1.0))
         return None
 
     def fetch_ticker_data(
         self, 
         ticker: str, 
         days: Optional[int] = None, 
-        force_refresh: bool = False, 
+        force_refresh: bool = False,
         cache_only: bool = False,
         benchmark_latest_date: Optional[pd.Timestamp] = None
     ) -> Optional[pd.DataFrame]:
         """
-        下載單一標的歷史資料，具備 curl_cffi 偽裝、指數退避重試與故障隔離保護
+        強化型單一標的下載函式：
+        1. 嚴格檢查快取時效 (對比最新預期交易日與基準日期)
+        2. 台股 FinMind + TWSE 備援補齊
+        3. 美股 yfinance (end+2日防截斷) + curl_cffi 偽裝 + Stooq 備援
         """
-        cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
+        is_tw = (".TW" in ticker) or (".TWO" in ticker)
         lookback = days if days else config.lookback_days
         if lookback >= 365:
             min_rows = max(120, int(lookback * 0.45))
         else:
             min_rows = min(30, max(5, lookback // 3))
-        start_date = (datetime.now() - timedelta(days=lookback)).strftime("%Y-%m-%d")
-        allow_save_cache = (days is None) or (days >= config.lookback_days)
 
-        # 1. 快取唯讀模式
-        if cache_only and os.path.exists(cache_file):
-            try:
-                df = pd.read_csv(cache_file, index_col="date", parse_dates=True)
-                df = self._clean_data_frame(df)
-                return df if len(df) >= min_rows else None
-            except Exception:
-                pass
+        now_tw = self.get_taipei_now()
+        start_date = (now_tw - timedelta(days=lookback)).strftime("%Y-%m-%d")
+        end_date = (now_tw + timedelta(days=2)).strftime("%Y-%m-%d")
+        cache_file = os.path.join(self.cache_dir, f"{ticker.replace(':', '_')}.csv")
+        allow_save_cache = (days is None or days == config.lookback_days)
 
-        # 2. 快取時效檢查
+        # 1. 純快取模式
+        if cache_only:
+            if os.path.exists(cache_file):
+                try:
+                    df_cache = pd.read_csv(cache_file, index_col="date", parse_dates=True)
+                    df_cache = self._clean_data_frame(df_cache)
+                    if len(df_cache) >= min_rows:
+                        return df_cache
+                except Exception:
+                    pass
+            return None
+
+        # 2. 快取時效性精準檢查
+        expected_date = self.get_expected_latest_trading_date(is_tw)
         if not force_refresh and os.path.exists(cache_file):
             try:
                 df_cache = pd.read_csv(cache_file, index_col="date", parse_dates=True)
                 df_cache = self._clean_data_frame(df_cache)
                 
                 cache_lagging = False
-                if benchmark_latest_date is not None and not df_cache.empty:
-                    if df_cache.index[-1].date() < benchmark_latest_date.date():
+                if not df_cache.empty:
+                    last_cache_date = df_cache.index[-1].date()
+                    # 若快取最新日期早於市場預期交易日，必須更新
+                    if last_cache_date < expected_date:
+                        cache_lagging = True
+                    # 若有基準日期且快取落後於基準，必須更新
+                    if benchmark_latest_date is not None and last_cache_date < benchmark_latest_date.date():
                         cache_lagging = True
 
-                tw_tz = timezone(timedelta(hours=8))
-                now_tw = datetime.now(tw_tz)
-                mtime_tw = datetime.fromtimestamp(os.path.getmtime(cache_file), tz=tw_tz)
-                is_tw_ticker = (".TW" in ticker) or (".TWO" in ticker)
-                if is_tw_ticker:
-                    cutoff_tw = now_tw.replace(hour=13, minute=40, second=0, microsecond=0)
-                    if now_tw >= cutoff_tw and mtime_tw < cutoff_tw:
-                        cache_lagging = True
-
-                if not cache_lagging and mtime_tw.date() == now_tw.date() and len(df_cache) >= min_rows:
+                if not cache_lagging and len(df_cache) >= min_rows:
                     return df_cache
             except Exception:
                 pass
 
-        # 3. 台股優先走 FinMind
-        is_tw = (".TW" in ticker) or (".TWO" in ticker)
+        # 3. 台股優先嘗試 FinMind
         df_fm = None
         has_unadjusted_split = False
         if is_tw:
@@ -234,24 +262,27 @@ class TechDataLoader:
                 has_unadjusted_split = bool((df_fm["close"].pct_change() < -0.35).any())
                 
                 fm_lagging = False
-                if benchmark_latest_date is not None and not df_fm.empty:
-                    if df_fm.index[-1].date() < benchmark_latest_date.date():
+                if not df_fm.empty:
+                    if df_fm.index[-1].date() < expected_date:
+                        fm_lagging = True
+                    if benchmark_latest_date is not None and df_fm.index[-1].date() < benchmark_latest_date.date():
                         fm_lagging = True
 
+                # 若 FinMind 資料完整且無歷史假除權，直接採用
                 if not fm_lagging and not has_unadjusted_split and len(df_fm) >= min_rows:
                     if allow_save_cache:
                         df_fm.to_csv(cache_file)
                     return df_fm
 
-        # 4. 美股標的，或台股 FinMind 失敗/落後時，走 yfinance 搭配 curl_cffi 與指數退避 3 次重試
+        # 4. yfinance 下載 (美股標的，或台股需取得完整調整後歷史)
         df = None
         for attempt in range(3):
             try:
-                # 優先使用 curl_cffi 偽裝的 Session，徹底繞過 GitHub Actions 雲端 IP 的 429 Rate Limit
                 yf_session = self.curl_session if self.curl_session else None
                 df = yf.download(
                     ticker, 
-                    start=start_date, 
+                    start=start_date,
+                    end=end_date,
                     progress=False, 
                     auto_adjust=True,
                     multi_level_index=False,
@@ -259,25 +290,22 @@ class TechDataLoader:
                 )
                 if df is not None and not df.empty:
                     break
-            except Exception as e:
-                # 指數退避等待 (1s, 2s, 4s + 隨機擾動)
-                sleep_sec = (2 ** attempt) + random.uniform(0.5, 1.2)
-                time.sleep(sleep_sec)
+            except Exception:
+                time.sleep((2 ** attempt) + random.uniform(0.5, 1.2))
 
-        # 5. yfinance 仍失敗時的美股備援 (Stooq)
+        # 5. 美股備援 (Stooq)
         if (df is None or df.empty) and not is_tw:
             stooq_df = self.fetch_stooq_fallback(ticker, days=lookback)
             if stooq_df is not None and len(stooq_df) >= min_rows:
                 df = stooq_df
 
+        # 若下載皆空，嘗試回退本機快取
         if df is None or df.empty:
-            # 容錯回退：若網路抓取失敗但本機已有歷史快取，優先回傳既有快取避免斷頭
             if os.path.exists(cache_file):
                 try:
                     fallback_cache = pd.read_csv(cache_file, index_col="date", parse_dates=True)
                     fallback_cache = self._clean_data_frame(fallback_cache)
                     if len(fallback_cache) >= min_rows:
-                        print(f"⚠️ {ticker} 網路下載受阻，使用本機既有快取平穩回退。")
                         return fallback_cache
                 except Exception:
                     pass
@@ -302,10 +330,11 @@ class TechDataLoader:
         df.index.name = "date"
         df["symbol"] = ticker
         df = self._clean_data_frame(df)
-        
-        # 若為台股且 FinMind 最新日期更即時，以 FinMind 補齊
-        if is_tw and df_fm is not None and not df_fm.empty and not df.empty and not has_unadjusted_split:
-            if df.index[-1] < df_fm.index[-1]:
+
+        # 6. 台股最新交易日拼接補齊 (FinMind 或 TWSE OpenAPI)
+        if is_tw and not df.empty:
+            # 優先以 FinMind 補足 yfinance 缺漏的最新幾根 K 棒
+            if df_fm is not None and not df_fm.empty and df.index[-1] < df_fm.index[-1]:
                 missing = df_fm[df_fm.index > df.index[-1]]
                 if not missing.empty:
                     overlap_dates = df.index.intersection(df_fm.index)
@@ -314,9 +343,11 @@ class TechDataLoader:
                         last_common = overlap_dates[-1]
                         yf_px = float(df.loc[last_common, "close"])
                         fm_px = float(df_fm.loc[last_common, "close"])
-                        if yf_px > 0 and (abs(fm_px - yf_px) / yf_px) < 0.03:
+                        if yf_px > 0 and (abs(fm_px - yf_px) / yf_px) < 0.08:
                             can_stitch = True
-                    
+                    else:
+                        can_stitch = True
+
                     if can_stitch:
                         missing_clean = self._clean_data_frame(missing)
                         if not missing_clean.empty:
@@ -324,6 +355,24 @@ class TechDataLoader:
                             common_cols = [c for c in df.columns if c in missing_clean.columns]
                             df = pd.concat([df, missing_clean[common_cols]])
                             df = self._clean_data_frame(df)
+
+            # 若仍落後於 expected_date，呼叫 TWSE OpenAPI 補入當日官方收盤
+            if df.index[-1].date() < expected_date:
+                clean_id = ticker.split(".")[0].strip()
+                twse_all = self.fetch_twse_openapi_latest()
+                if clean_id in twse_all:
+                    item = twse_all[clean_id]
+                    bar_dt = pd.Timestamp(expected_date)
+                    new_row = pd.DataFrame([{
+                        "open": item["open"],
+                        "high": item["high"],
+                        "low": item["low"],
+                        "close": item["close"],
+                        "volume": item["volume"],
+                        "symbol": ticker
+                    }], index=pd.DatetimeIndex([bar_dt], name="date"))
+                    df = pd.concat([df, new_row])
+                    df = self._clean_data_frame(df)
 
         if df.empty or len(df) < min_rows:
             if os.path.exists(cache_file):
@@ -343,8 +392,7 @@ class TechDataLoader:
 
     def fetch_all_tech_data(self, force_refresh: bool = False, cache_only: bool = False) -> Dict[str, pd.DataFrame]:
         """
-        批次下載台美股追蹤名單，具備單標的故障隔離 (Fault Isolation)
-        個別標的異常只記錄 Warning 並優雅跳過，嚴禁拋出例外中斷管線
+        批次下載台美股追蹤名單，具備單標的故障隔離 (Fault Isolation) 與橫截面無損對齊
         """
         dataset = {}
         
@@ -376,18 +424,18 @@ class TechDataLoader:
             except Exception as e:
                 print(f"⚠️ 個別標的 {ticker} 下載異常，已優雅跳過保護管線: {e}")
 
-        # 橫截面最後日期一致性校驗 (台股)
+        # 橫截面日期一致性校驗 (台股)：以全體最遠交易日為準，落後標的前向填補 (ffill)，絕不截斷最新交易日
         tw_tickers = [t for t in TECH_UNIVERSE_TW.keys() if t in dataset]
         if tw_tickers:
-            if "0050.TW" in dataset and not dataset["0050.TW"].empty:
-                target_tw_date = dataset["0050.TW"].index[-1].date()
-            else:
-                tw_dates_series = pd.Series([dataset[t].index[-1].date() for t in tw_tickers])
-                target_tw_date = tw_dates_series.mode()[0]
+            max_tw_date = max(dataset[t].index[-1].date() for t in tw_tickers)
             for t in tw_tickers:
                 d = dataset[t]
-                if not d.empty and d.index[-1].date() > target_tw_date:
-                    dataset[t] = d[d.index.date <= target_tw_date]
+                if not d.empty and d.index[-1].date() < max_tw_date:
+                    # 使用前向填補 (ffill) 延伸最後一筆數據至 max_tw_date，避免全域截斷
+                    last_row = d.iloc[-1:].copy()
+                    last_row.index = pd.DatetimeIndex([pd.Timestamp(max_tw_date)], name="date")
+                    dataset[t] = pd.concat([d, last_row])
+                    dataset[t] = dataset[t][~dataset[t].index.duplicated(keep="last")].sort_index()
 
         # 2. 美股
         print("下載美股數據..." if not cache_only else "讀取美股快取數據...")
@@ -417,18 +465,17 @@ class TechDataLoader:
             except Exception as e:
                 print(f"⚠️ 個別標的 {ticker} 下載異常，已優雅跳過保護管線: {e}")
 
-        # 橫截面最後日期一致性校驗 (美股)
+        # 橫截面日期一致性校驗 (美股)：以全體最遠交易日為準，落後標的前向填補 (ffill)
         us_tickers = [t for t in TECH_UNIVERSE_US if t in dataset]
         if us_tickers:
-            if "QQQ" in dataset and not dataset["QQQ"].empty:
-                target_us_date = dataset["QQQ"].index[-1].date()
-            else:
-                us_dates_series = pd.Series([dataset[t].index[-1].date() for t in us_tickers])
-                target_us_date = us_dates_series.mode()[0]
+            max_us_date = max(dataset[t].index[-1].date() for t in us_tickers)
             for t in us_tickers:
                 d = dataset[t]
-                if not d.empty and d.index[-1].date() > target_us_date:
-                    dataset[t] = d[d.index.date <= target_us_date]
+                if not d.empty and d.index[-1].date() < max_us_date:
+                    last_row = d.iloc[-1:].copy()
+                    last_row.index = pd.DatetimeIndex([pd.Timestamp(max_us_date)], name="date")
+                    dataset[t] = pd.concat([d, last_row])
+                    dataset[t] = dataset[t][~dataset[t].index.duplicated(keep="last")].sort_index()
 
         print(f"數據下載完成，共成功載入 {len(dataset)} 檔標的。")
         return dataset

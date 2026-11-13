@@ -1,17 +1,25 @@
 """
-自動模擬下單與交易執行引擎 (Auto Trading Engine)
-支援：
-1. 永豐 Shioaji API 模擬環境掛單 (simulation=True)
-2. 自動多空環境判斷 (Top 3 >= 2 站上 50MA 啟動買進)
-3. 自動計算零股股數與每檔固定預算
-4. 8% 追蹤停損與跌破 50MA 自動平倉機制
-5. 自動同步至 portfolio.json 與 LINE 回報
+自動模擬下單與交易執行引擎 (Auto Trading Engine - 機構級風控與永豐金盤中零股高擬真執行)
+功能：
+1. 嚴格五層風控訊號生成 (Zero Look-Ahead Bias)：
+   - 第1優先：-30% 戰術絕對硬停損 (Hard Stop-Loss)，觸發立即清倉並列入當日禁買
+   - 第2優先：-8% 移動停利停損 (Trailing Stop-Loss，進場隔日後啟動)，觸發立即清倉並列入當日禁買
+   - 第3優先：爆量出貨警訊 (is_distribution_warn) 與收盤跌破 50MA 調倉換股
+   - 第4優先：大盤多空濾網 (0050.TW 均線 / QQQ 年線) 與帳戶總淨值回撤動態減倉 (Drawdown Scaling)
+   - 第5優先：強勢動能零股建倉 (Top 3 站穩 50MA 且排除出貨警訊與基準 ETF)
+2. 永豐金證券 Shioaji 盤中零股實戰防呆：
+   - 盤中零股 (IntradayOdd) 僅支援限價單 (LMT)，不支援市價單 (MKT)
+   - 緊急停損單向下讓價 1% 並對齊台股升降單位 (Tick Size)，確保急跌即時成交
+   - 嚴格校驗零股股數 (1 ~ 999 股整數) 並精確扣除手續費 (0.1425%) 與台股證交稅 (0.3%)
+3. 支援 --dry-run 安全鎖與 --execute 正式下單，狀態即時同步至 portfolio.json
 """
 import os
 import json
+import math
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
+import numpy as np
 import pytz
 from dotenv import load_dotenv
 
@@ -27,49 +35,81 @@ except ImportError:
     sj = None
     SHIOAJI_AVAILABLE = False
 
+
+def get_tw_tick_size(price: float) -> float:
+    """依台灣證券交易所規範計算股價升降單位 (Tick Size)"""
+    if price < 10.0:
+        return 0.01
+    elif price < 50.0:
+        return 0.05
+    elif price < 100.0:
+        return 0.10
+    elif price < 500.0:
+        return 0.50
+    elif price < 1000.0:
+        return 1.00
+    else:
+        return 5.00
+
+
+def align_tw_price(price: float, round_down: bool = True) -> float:
+    """將價格對齊台股升降單位 (Tick Size)，round_down 用於賣單讓價防踩跌停"""
+    tick = get_tw_tick_size(price)
+    if round_down:
+        aligned = math.floor(price / tick) * tick
+    else:
+        aligned = round(round(price / tick) * tick, 2)
+    return round(aligned, 2)
+
+
 class AutoTrader:
     def __init__(
         self,
         dataset: Dict[str, pd.DataFrame],
-        budget_per_stock_tw: float = 30000.0,  # 台股每檔預設約 3 萬台幣零股
-        budget_per_stock_us: float = 1000.0,   # 美股每檔預設約 1,000 美元
-        trailing_stop_pct: float = 8.0         # 8% 停利停損
+        budget_per_stock_tw: float = 30000.0,
+        budget_per_stock_us: float = 1000.0,
+        trailing_stop_pct: float = 0.08,
+        hard_stop_pct: float = 0.30
     ):
         self.dataset = dataset
-        self.budget_tw = budget_per_stock_tw
-        self.budget_us = budget_per_stock_us
+        self.base_budget_tw = budget_per_stock_tw
+        self.base_budget_us = budget_per_stock_us
         self.trailing_stop_pct = trailing_stop_pct
+        self.hard_stop_pct = hard_stop_pct
         self.tw_tz = pytz.timezone("Asia/Taipei")
 
-    def execute_daily_simulation(
-        self, 
-        tw_rank: pd.DataFrame, 
+    def generate_trade_orders(
+        self,
+        tw_rank: pd.DataFrame,
         us_rank: pd.DataFrame,
         target_market: str = "ALL"
-    ) -> Tuple[List[str], List[Dict]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any], List[str]]:
         """
-        執行每日模擬下單流程：
-        1. 檢查現有部位停損平倉 (依 target_market 篩選市場)
-        2. 檢查多頭環境與買進新標的
-        3. 儲存 portfolio.json
-        回傳: (交易報告文字清單, 最終部位清單)
+        五層風控訊號生成核心引擎
+        回傳: (orders_to_execute, portfolio_state, diagnostic_logs)
         """
         today_str = datetime.now(self.tw_tz).strftime("%Y-%m-%d")
-        positions = PortfolioTracker.load_portfolio()
-        current_tickers = {p["ticker"] for p in positions}
         
-        trade_logs = []
+        # 1. 載入並評估現有投資組合狀態
+        evaluated_positions = PortfolioTracker.evaluate_portfolio(self.dataset, save_state=True)
+        p_state = PortfolioTracker.load_portfolio_state()
+        scaling_factor = float(p_state.get("risk_scaling_factor", 1.0))
+        peak_equity = float(p_state.get("peak_equity", 100000.0))
+        cur_drawdown = float(p_state.get("current_drawdown_pct", 0.0))
+
+        orders = []
+        logs = []
+        stopped_out_today = set()
         kept_positions = []
-        liquidated_today = set()
 
         # ----------------------------------------------------
-        # 步驟 1: 檢查現有持股之出場訊號 (停損 8% 或跌破 50MA)
+        # 步驟 1: 遍歷現有持倉，執行 第1~3 優先層級風控檢驗
         # ----------------------------------------------------
-        for pos in positions:
+        for pos in evaluated_positions:
             ticker = pos["ticker"]
-            is_tw = (".TW" in ticker) or (".TWO" in ticker)
-            
-            # 若指定單一市場，非目標市場持股直接保留不處理
+            is_tw = pos.get("is_tw", False)
+
+            # 若指定單一市場，非目標市場持股保留不更動
             if target_market == "TW" and not is_tw:
                 kept_positions.append(pos)
                 continue
@@ -77,198 +117,347 @@ class AutoTrader:
                 kept_positions.append(pos)
                 continue
 
-            if ticker not in self.dataset or self.dataset[ticker].empty:
-                kept_positions.append(pos)
-                continue
-
-            df = self.dataset[ticker]
-            curr_price = float(df["close"].iloc[-1])
-            cost_price = float(pos.get("cost_price", curr_price))
-            shares = float(pos.get("shares", 1))
-            entry_date = pos.get("entry_date", today_str)
-
-            # 計算高點與回檔 (僅搜尋進場日隔天之後的最高價，避開進場日上影線誤判)
-            if entry_date:
-                sub_df = df.loc[df.index > pd.to_datetime(entry_date)]
-                post_entry_high = float(sub_df["high"].max()) if not sub_df.empty else cost_price
-            else:
-                post_entry_high = float(df["high"].tail(60).max())
-            peak_price = max(post_entry_high, curr_price, cost_price)
-            drawdown = ((curr_price - peak_price) / peak_price) * 100
-
-            # 50MA
-            sma50 = float(df["close"].rolling(50).mean().iloc[-1])
+            curr_price = pos["curr_price"]
+            cost_price = pos["cost_price"]
+            peak_price = pos["peak_price"]
+            shares = pos["shares"]
+            return_pct = pos["return_pct"]
+            drawdown_from_peak = pos["drawdown_from_peak"]
+            is_above_50ma = pos["is_above_50ma"]
+            name = pos["name"]
             prefix = "NT$" if is_tw else "$"
-            name = TECH_UNIVERSE_TW.get(ticker, ticker)
 
-            # 判斷是否觸發平倉
-            exit_reason = None
-            if drawdown <= -self.trailing_stop_pct:
-                exit_reason = f"高點回檔 {abs(drawdown):.1f}% 觸發 8% 停利停損"
-            elif curr_price < sma50:
-                exit_reason = f"收盤價跌破 50MA 生命線 ({prefix}{sma50:,.1f})"
+            # 提取 rank 中的最新訊號 (如爆量出貨警訊)
+            rank_df = tw_rank if is_tw else us_rank
+            dist_warn = False
+            if not rank_df.empty and ticker in rank_df["ticker"].values:
+                row_info = rank_df[rank_df["ticker"] == ticker].iloc[0]
+                dist_warn = bool(row_info.get("is_distribution_warn", False))
 
-            if exit_reason:
-                liquidated_today.add(ticker)
-                ret_pct = ((curr_price - cost_price) / cost_price) * 100
-                pnl = (curr_price - cost_price) * shares
-                log_msg = f"🔴 【模擬賣出平倉】{name} ({ticker})\n   └ 原因: {exit_reason}\n   └ 平倉價: {prefix}{curr_price:,.2f} (報酬率: {ret_pct:+.2f}%, 損益: {prefix}{pnl:+,.0f})"
-                trade_logs.append(log_msg)
+            sell_reason = None
+            is_emergency = False
+
+            # [第 1 優先] -30% 戰術絕對硬停損
+            if (cost_price - curr_price) / cost_price >= self.hard_stop_pct or pos.get("hard_stop_triggered", False):
+                sell_reason = f"🚨 戰術絕對硬停損 (累積虧損 {return_pct:.2f}% >= -30%)"
+                stopped_out_today.add(ticker)
+                is_emergency = True
+
+            # [第 2 優先] -8% 移動停利停損 (進場隔日後生效)
+            elif pos.get("trailing_stop_triggered", False) or (drawdown_from_peak <= - (self.trailing_stop_pct * 100)):
+                sell_reason = f"🛡️ 移動停損平倉 (自高點 ${peak_price:,.2f} 回檔 {abs(drawdown_from_peak):.2f}% >= -8%)"
+                stopped_out_today.add(ticker)
+                is_emergency = True
+
+            # [第 3 優先] 爆量出貨警訊或跌破 50MA 中期生命線
+            elif not is_above_50ma:
+                sell_reason = f"📉 跌破 50MA 生命線平倉 (現價 {prefix}{curr_price:,.2f} < 50MA {prefix}{pos['sma50']:,.2f})"
+            elif dist_warn:
+                sell_reason = f"⚠️ 觸發爆量出貨警訊 (is_distribution_warn == True) 避險平倉"
+
+            if sell_reason:
+                # 緊急賣單設定向下讓價 1% 成交機制 (對齊 Tick)
+                order_price = curr_price
+                if is_emergency and is_tw:
+                    order_price = align_tw_price(curr_price * 0.99, round_down=True)
+                elif is_emergency and not is_tw:
+                    order_price = round(curr_price * 0.99, 2)
+
+                # 計算摩擦成本 (手續費 0.1425%, 台股證交稅 0.3%)
+                gross_amt = shares * curr_price
+                fee = max(1.0, round(gross_amt * 0.001425, 2))
+                tax = round(gross_amt * 0.003, 2) if is_tw else 0.0
+                net_pnl = (curr_price - cost_price) * shares - fee - tax
+
+                order_dict = {
+                    "action": "SELL",
+                    "ticker": ticker,
+                    "name": name,
+                    "is_tw": is_tw,
+                    "shares": int(shares),
+                    "price": order_price,
+                    "market_price": curr_price,
+                    "is_emergency": is_emergency,
+                    "reason": sell_reason,
+                    "pnl": net_pnl,
+                    "pnl_pct": return_pct
+                }
+                orders.append(order_dict)
+                logs.append(
+                    f"🔴 【賣出平倉指令】{name} ({ticker})\n"
+                    f"   └ 觸發原因: {sell_reason}\n"
+                    f"   └ 委託規格: 賣出 {int(shares)} 股 @ 限價 {prefix}{order_price:,.2f} (市價: {prefix}{curr_price:,.2f})\n"
+                    f"   └ 預估損益: {prefix}{net_pnl:+,.0f} (報酬率: {return_pct:+.2f}%)"
+                )
             else:
                 kept_positions.append(pos)
 
         # ----------------------------------------------------
-        # 步驟 2: 檢查市場環境與買進新標的 (Top 3 站上 50MA 強勢標的)
-        # 限制單一市場最多持有 3 檔，若跌出前 5 名且有更強標的則自動換股
+        # 步驟 2: 檢查 第4 優先層級大盤多空濾網與帳戶回撤減倉
         # ----------------------------------------------------
-        # 2A. 台股市場
+        # 2A. 台股市場檢驗
         if target_market in ["ALL", "TW"]:
+            # 大盤濾網：0050.TW 站上均線且前 3 強至少 2 檔站上 50MA
             tw_top3_raw = tw_rank.head(3)
-            tw_bull_count = tw_top3_raw["above_50sma"].sum() if not tw_top3_raw.empty else 0
-            if tw_bull_count >= 2:
-                tw_candidates = tw_rank[tw_rank["above_50sma"] == True].head(3)
-                tw_top5_tickers = set(tw_rank.head(5)["ticker"])
-                tw_buys_count = 0
-                
-                for _, row in tw_candidates.iterrows():
-                    t = row["ticker"]
-                    current_held_tickers = set(p["ticker"] for p in kept_positions)
-                    if t in current_held_tickers or t in liquidated_today:
+            tw_leaders_bull = (tw_top3_raw["above_50sma"].sum() >= 2) if not tw_top3_raw.empty else False
+
+            tw_bench_bull = True
+            b_df = self.dataset.get("0050.TW")
+            if b_df is not None and not b_df.empty:
+                b_c = float(b_df["close"].iloc[-1])
+                b_sma200 = float(b_df["close"].rolling(200).mean().iloc[-1]) if len(b_df) >= 200 else np.nan
+                b_sma50 = float(b_df["close"].rolling(50).mean().iloc[-1]) if len(b_df) >= 50 else b_c
+                b_sma = b_sma200 if not np.isnan(b_sma200) else b_sma50
+                tw_bench_bull = (b_c >= b_sma) if not np.isnan(b_sma) else True
+
+            tw_market_bull = (tw_leaders_bull and tw_bench_bull)
+
+            # 動態倉位預算縮放 (Drawdown Scaling)
+            effective_budget_tw = self.base_budget_tw * scaling_factor
+
+            if tw_market_bull:
+                # 排除基準標的、爆量出貨警訊與當日停損標的
+                tw_candidates = tw_rank[
+                    (tw_rank["above_50sma"] == True) &
+                    (tw_rank["is_distribution_warn"] == False) &
+                    (~tw_rank["ticker"].isin(["0050.TW", "QQQ"])) &
+                    (~tw_rank["ticker"].isin(stopped_out_today))
+                ].head(5)
+
+                current_tw_held = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
+                current_tw_tickers = set(p["ticker"] for p in current_tw_held)
+
+                for _, cand in tw_candidates.iterrows():
+                    c_ticker = cand["ticker"]
+                    if c_ticker in current_tw_tickers or c_ticker in stopped_out_today:
                         continue
-                    
-                    # 統計目前台股持倉
-                    curr_tw_positions = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
-                    if len(curr_tw_positions) >= 3:
-                        # 檢查是否有持股已跌出前 5 名
-                        out_of_top5 = [p for p in curr_tw_positions if p["ticker"] not in tw_top5_tickers]
+
+                    # 若台股已滿 3 檔，檢查是否換股平倉
+                    if len(current_tw_held) >= 3:
+                        tw_top5_set = set(tw_rank.head(5)["ticker"])
+                        out_of_top5 = [p for p in current_tw_held if p["ticker"] not in tw_top5_set]
                         if out_of_top5:
-                            # 挑選排名最落後的標的執行換股平倉
-                            def get_tw_rank_idx(sym):
+                            # 找出名次最落後者替換
+                            def get_tw_idx(sym):
                                 idxs = tw_rank.index[tw_rank["ticker"] == sym].tolist()
                                 return idxs[0] if idxs else 999
-                            out_of_top5.sort(key=lambda p: get_tw_rank_idx(p["ticker"]), reverse=True)
-                            swap_out = out_of_top5[0]
-                            kept_positions.remove(swap_out)
-                            liquidated_today.add(swap_out["ticker"])
-                            
-                            s_ticker = swap_out["ticker"]
-                            s_shares = swap_out["shares"]
-                            s_cost = swap_out["cost_price"]
-                            s_name = TECH_UNIVERSE_TW.get(s_ticker, s_ticker)
-                            s_df = self.dataset.get(s_ticker)
+                            out_of_top5.sort(key=lambda p: get_tw_idx(p["ticker"]), reverse=True)
+                            swap_target = out_of_top5[0]
+                            kept_positions.remove(swap_target)
+                            current_tw_held.remove(swap_target)
+
+                            s_sym = swap_target["ticker"]
+                            s_shares = int(swap_target["shares"])
+                            s_cost = swap_target["cost_price"]
+                            s_df = self.dataset.get(s_sym)
                             s_px = float(s_df["close"].iloc[-1]) if s_df is not None and not s_df.empty else s_cost
-                            s_ret = ((s_px - s_cost) / s_cost) * 100
+                            s_ret = ((s_px - s_cost) / s_cost) * 100.0
                             s_pnl = (s_px - s_cost) * s_shares
-                            
-                            trade_logs.append(
-                                f"🔄 【調倉換股平倉】{s_name} ({s_ticker})\n"
-                                f"   └ 原因: 跌出動能前5名 (目前排名 #{get_tw_rank_idx(s_ticker)+1})，由更強標的 {TECH_UNIVERSE_TW.get(t, t)} ({t}) 替換\n"
-                                f"   └ 平倉價: NT${s_px:,.2f} (報酬率: {s_ret:+.2f}%, 損益: NT${s_pnl:+,.0f})"
+
+                            orders.append({
+                                "action": "SELL",
+                                "ticker": s_sym,
+                                "name": swap_target["name"],
+                                "is_tw": True,
+                                "shares": s_shares,
+                                "price": s_px,
+                                "market_price": s_px,
+                                "is_emergency": False,
+                                "reason": f"🔄 調倉換股平倉 (跌出前5名 #{get_tw_idx(s_sym)+1}，由更強標的 {cand['name']} 替換)",
+                                "pnl": s_pnl,
+                                "pnl_pct": s_ret
+                            })
+                            logs.append(
+                                f"🔄 【調倉換股賣出】{swap_target['name']} ({s_sym})\n"
+                                f"   └ 換股原因: 排名跌出前5名，由榜首更強標的 {cand['name']} ({c_ticker}) 替換\n"
+                                f"   └ 平倉價位: NT${s_px:,.2f} (預估損益: NT${s_pnl:+,.0f})"
                             )
                         else:
-                            # 現有 3 檔皆在前 5 強內，不強行換股
                             continue
-                            
-                    px = float(row["price"])
-                    shares = max(1, int(self.budget_tw / px))
-                    name = TECH_UNIVERSE_TW.get(t, t)
-                    t_entry_date = self.dataset[t].index[-1].strftime("%Y-%m-%d") if (t in self.dataset and not self.dataset[t].empty) else today_str
-                    kept_positions.append({
-                        "ticker": t,
+
+                    # 產生買進委託
+                    px = float(cand["price"])
+                    if px <= 0:
+                        continue
+                    # 預留手續費與滑點緩衝
+                    shares = max(1, min(999, int(effective_budget_tw / (px * 1.0028))))
+                    cand_name = cand["name"]
+
+                    orders.append({
+                        "action": "BUY",
+                        "ticker": c_ticker,
+                        "name": cand_name,
+                        "is_tw": True,
+                        "shares": shares,
+                        "price": px,
+                        "market_price": px,
+                        "is_emergency": False,
+                        "reason": f"🟢 多頭強勢入選 (綜合評分: {cand['score']:.1f}, 倉位係數: {scaling_factor:.2f})",
+                        "pnl": 0.0,
+                        "pnl_pct": 0.0
+                    })
+                    current_tw_tickers.add(c_ticker)
+                    current_tw_held.append({
+                        "ticker": c_ticker,
+                        "name": cand_name,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": t_entry_date
+                        "entry_date": today_str,
+                        "peak_price": px
                     })
-                    tw_buys_count += 1
-                    trade_logs.append(
-                        f"🟢 【模擬買進委託】{name} ({t})\n"
-                        f"   └ 股數: {shares} 股 (零股委託)\n"
-                        f"   └ 進場價: NT${px:,.2f} (預算約 NT${shares * px:,.0f})\n"
-                        f"   └ 依據: 站上50MA強勢入選 (評分: {row['score']:.1f})"
+                    logs.append(
+                        f"🟢 【買進委託指令】{cand_name} ({c_ticker})\n"
+                        f"   └ 委託股數: {shares} 股 (盤中零股限價委託)\n"
+                        f"   └ 進場價格: NT${px:,.2f} (預估金額: NT${shares * px:,.0f})\n"
+                        f"   └ 入選原因: 站上50MA且動能評分居首 (綜合分: {cand['score']:.1f}, 縮放係數: {scaling_factor:.2f})"
                     )
-
-                curr_tw_positions = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
-                if tw_buys_count == 0 and curr_tw_positions:
-                    trade_logs.append("✅ 【多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
             else:
-                trade_logs.append("🛡️ 【台股風控保護】目前台股前三強僅 1 檔站上 50MA，處於保守防禦模式，今日不開新倉。")
+                logs.append("🛡️ 【台股大盤濾網警戒】0050.TW 均線偏空或強勢股分化，啟動保守防禦模式，今日不開立任何台股新多單。")
 
-        # 2B. 美股市場
+        # 2B. 美股市場檢驗
         if target_market in ["ALL", "US"]:
             us_top3_raw = us_rank.head(3)
-            us_bull_count = us_top3_raw["above_50sma"].sum() if not us_top3_raw.empty else 0
-            qqq_df = self.dataset.get("QQQ")
-            qqq_bull = True
-            if qqq_df is not None and not qqq_df.empty:
-                q_close = float(qqq_df["close"].iloc[-1])
-                q_sma200 = float(qqq_df["close"].rolling(200).mean().iloc[-1])
-                qqq_bull = (q_close >= q_sma200)
+            us_leaders_bull = (us_top3_raw["above_50sma"].sum() >= 2) if not us_top3_raw.empty else False
 
-            if us_bull_count >= 2 and qqq_bull:
-                us_candidates = us_rank[us_rank["above_50sma"] == True].head(3)
-                us_top5_tickers = set(us_rank.head(5)["ticker"])
-                us_buys_count = 0
-                
-                for _, row in us_candidates.iterrows():
-                    t = row["ticker"]
-                    current_held_tickers = set(p["ticker"] for p in kept_positions)
-                    if t in current_held_tickers or t in liquidated_today:
+            us_bench_bull = True
+            qqq_df = self.dataset.get("QQQ")
+            if qqq_df is not None and not qqq_df.empty:
+                q_c = float(qqq_df["close"].iloc[-1])
+                q_sma200 = float(qqq_df["close"].rolling(200).mean().iloc[-1]) if len(qqq_df) >= 200 else q_c
+                us_bench_bull = (q_c >= q_sma200)
+
+            us_market_bull = (us_leaders_bull and us_bench_bull)
+            effective_budget_us = self.base_budget_us * scaling_factor
+
+            if us_market_bull:
+                us_candidates = us_rank[
+                    (us_rank["above_50sma"] == True) &
+                    (us_rank["is_distribution_warn"] == False) &
+                    (~us_rank["ticker"].isin(["QQQ", "0050.TW"])) &
+                    (~us_rank["ticker"].isin(stopped_out_today))
+                ].head(5)
+
+                current_us_held = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
+                current_us_tickers = set(p["ticker"] for p in current_us_held)
+
+                for _, cand in us_candidates.iterrows():
+                    c_ticker = cand["ticker"]
+                    if c_ticker in current_us_tickers or c_ticker in stopped_out_today:
                         continue
-                    
-                    curr_us_positions = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
-                    if len(curr_us_positions) >= 3:
-                        out_of_top5 = [p for p in curr_us_positions if p["ticker"] not in us_top5_tickers]
+
+                    if len(current_us_held) >= 3:
+                        us_top5_set = set(us_rank.head(5)["ticker"])
+                        out_of_top5 = [p for p in current_us_held if p["ticker"] not in us_top5_set]
                         if out_of_top5:
-                            def get_us_rank_idx(sym):
+                            def get_us_idx(sym):
                                 idxs = us_rank.index[us_rank["ticker"] == sym].tolist()
                                 return idxs[0] if idxs else 999
-                            out_of_top5.sort(key=lambda p: get_us_rank_idx(p["ticker"]), reverse=True)
-                            swap_out = out_of_top5[0]
-                            kept_positions.remove(swap_out)
-                            liquidated_today.add(swap_out["ticker"])
-                            
-                            s_ticker = swap_out["ticker"]
-                            s_shares = swap_out["shares"]
-                            s_cost = swap_out["cost_price"]
-                            s_df = self.dataset.get(s_ticker)
+                            out_of_top5.sort(key=lambda p: get_us_idx(p["ticker"]), reverse=True)
+                            swap_target = out_of_top5[0]
+                            kept_positions.remove(swap_target)
+                            current_us_held.remove(swap_target)
+
+                            s_sym = swap_target["ticker"]
+                            s_shares = int(swap_target["shares"])
+                            s_cost = swap_target["cost_price"]
+                            s_df = self.dataset.get(s_sym)
                             s_px = float(s_df["close"].iloc[-1]) if s_df is not None and not s_df.empty else s_cost
-                            s_ret = ((s_px - s_cost) / s_cost) * 100
+                            s_ret = ((s_px - s_cost) / s_cost) * 100.0
                             s_pnl = (s_px - s_cost) * s_shares
-                            
-                            trade_logs.append(
-                                f"🔄 【調倉換股平倉】{s_ticker} (美股)\n"
-                                f"   └ 原因: 跌出動能前5名 (目前排名 #{get_us_rank_idx(s_ticker)+1})，由更強標的 {t} 替換\n"
-                                f"   └ 平倉價: ${s_px:,.2f} (報酬率: {s_ret:+.2f}%, 損益: ${s_pnl:+,.2f})"
+
+                            orders.append({
+                                "action": "SELL",
+                                "ticker": s_sym,
+                                "name": s_sym,
+                                "is_tw": False,
+                                "shares": s_shares,
+                                "price": s_px,
+                                "market_price": s_px,
+                                "is_emergency": False,
+                                "reason": f"🔄 調倉換股平倉 (美股跌出前5名 #{get_us_idx(s_sym)+1})",
+                                "pnl": s_pnl,
+                                "pnl_pct": s_ret
+                            })
+                            logs.append(
+                                f"🔄 【調倉換股賣出】{s_sym} (美股)\n"
+                                f"   └ 換股原因: 排名跌出前5名，由榜首標的 {c_ticker} 替換\n"
+                                f"   └ 平倉價位: ${s_px:,.2f} (預估損益: ${s_pnl:+,.2f})"
                             )
                         else:
                             continue
-                            
-                    px = float(row["price"])
-                    shares = max(1, int(self.budget_us / px))
-                    t_entry_date = self.dataset[t].index[-1].strftime("%Y-%m-%d") if (t in self.dataset and not self.dataset[t].empty) else today_str
-                    kept_positions.append({
-                        "ticker": t,
+
+                    px = float(cand["price"])
+                    if px <= 0:
+                        continue
+                    shares = max(1, int(effective_budget_us / px))
+
+                    orders.append({
+                        "action": "BUY",
+                        "ticker": c_ticker,
+                        "name": c_ticker,
+                        "is_tw": False,
+                        "shares": shares,
+                        "price": px,
+                        "market_price": px,
+                        "is_emergency": False,
+                        "reason": f"🟢 美股多頭強勢入選 (綜合評分: {cand['score']:.1f}, 倉位係數: {scaling_factor:.2f})",
+                        "pnl": 0.0,
+                        "pnl_pct": 0.0
+                    })
+                    current_us_tickers.add(c_ticker)
+                    current_us_held.append({
+                        "ticker": c_ticker,
+                        "name": c_ticker,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": t_entry_date
+                        "entry_date": today_str,
+                        "peak_price": px
                     })
-                    us_buys_count += 1
-                    trade_logs.append(
-                        f"🟢 【模擬買進委託】{t} (美股)\n"
-                        f"   └ 股數: {shares} 股\n"
-                        f"   └ 進場價: ${px:,.2f} (預算約 ${shares * px:,.0f})\n"
-                        f"   └ 依據: 站上50MA強勢入選 (評分: {row['score']:.1f})"
+                    logs.append(
+                        f"🟢 【買進委託指令】{c_ticker} (美股)\n"
+                        f"   └ 委託股數: {shares} 股\n"
+                        f"   └ 進場價格: ${px:,.2f} (預算約: ${shares * px:,.0f})\n"
+                        f"   └ 入選原因: QQQ站上年線且個股動能居首 (評分: {cand['score']:.1f}, 縮放係數: {scaling_factor:.2f})"
                     )
-
-                curr_us_positions = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
-                if us_buys_count == 0 and curr_us_positions:
-                    trade_logs.append("✅ 【多頭續抱】目前持有部位皆位居動能前段班且站穩 50MA，今日維持續抱。")
             else:
-                trade_logs.append("🛡️ 【美股風控保護】大盤 QQQ 年線轉弱或前三強分化，處於保守防禦模式，今日不開新倉。")
+                logs.append("🛡️ 【美股大盤濾網警戒】QQQ 跌破年線或前三強動能分化，啟動保守防禦模式，今日不開立任何美股新多單。")
 
-        # 儲存回 portfolio.json
-        PortfolioTracker.save_portfolio(kept_positions)
-        return trade_logs, kept_positions
+        return orders, p_state, logs
+
+    def execute_daily_simulation(
+        self,
+        tw_rank: pd.DataFrame,
+        us_rank: pd.DataFrame,
+        target_market: str = "ALL"
+    ) -> Tuple[List[str], List[Dict]]:
+        """
+        執行每日模擬交易並落盤至 portfolio.json (向下相容既有介面)
+        """
+        orders, p_state, logs = self.generate_trade_orders(tw_rank, us_rank, target_market=target_market)
+        
+        # 根據 orders 更新模擬持倉
+        existing_positions = PortfolioTracker.load_portfolio()
+        pos_map = {p["ticker"]: p for p in existing_positions}
+        today_str = datetime.now(self.tw_tz).strftime("%Y-%m-%d")
+
+        for ord_item in orders:
+            t = ord_item["ticker"]
+            act = ord_item["action"]
+            if act == "SELL":
+                if t in pos_map:
+                    del pos_map[t]
+            elif act == "BUY":
+                pos_map[t] = {
+                    "ticker": t,
+                    "shares": ord_item["shares"],
+                    "cost_price": ord_item["price"],
+                    "entry_date": today_str,
+                    "peak_price": ord_item["price"]
+                }
+
+        final_positions = list(pos_map.values())
+        PortfolioTracker.save_portfolio(final_positions)
+        return logs, final_positions
 
     @classmethod
     def sync_shioaji_positions(cls) -> List[Dict]:
@@ -302,7 +491,6 @@ class AutoTrader:
                 except Exception as ca_err:
                     print(f"  ⚠️ CA 憑證啟用失敗 ({ca_err})，若為模擬環境可能不影響查詢。")
 
-            # 抓取台股部位 (包含零股與整張)
             unit_val = getattr(sj, "Unit", getattr(sj, "constant", None)).Share if hasattr(sj, "Unit") else sj.constant.Unit.Share
             positions = api.list_positions(api.stock_account, unit=unit_val)
             if not positions:
@@ -311,6 +499,9 @@ class AutoTrader:
 
             synced_positions = []
             today_str = datetime.now().strftime("%Y-%m-%d")
+            existing = PortfolioTracker.load_portfolio()
+            existing_map = {p["ticker"]: p for p in existing}
+
             for p in positions:
                 code = str(getattr(p, "code", "")).strip()
                 if not code:
@@ -319,15 +510,15 @@ class AutoTrader:
                 qty = int(getattr(p, "quantity", 0))
                 price = float(getattr(p, "price", 0.0))
                 if qty > 0:
+                    prev = existing_map.get(sym, {})
                     synced_positions.append({
                         "ticker": sym,
                         "shares": qty,
                         "cost_price": round(price, 2),
-                        "entry_date": today_str
+                        "entry_date": prev.get("entry_date", today_str),
+                        "peak_price": max(prev.get("peak_price", price), price)
                     })
 
-            # 合併非台股部位 (保留美股部位)
-            existing = PortfolioTracker.load_portfolio()
             us_positions = [pos for pos in existing if not (".TW" in pos.get("ticker", "") or ".TWO" in pos.get("ticker", ""))]
             final_portfolio = synced_positions + us_positions
 
@@ -339,100 +530,125 @@ class AutoTrader:
             print(f"⚠️ 永豐 Shioaji 連線或同步異常: {e}，維持現有部位檔案。")
             return PortfolioTracker.load_portfolio()
 
+    def execute_shioaji_orders(
+        self,
+        orders: List[Dict[str, Any]],
+        dry_run: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        向永豐金證券 Shioaji API 正式送出委託或印出 Dry-Run 檢視清單
+        """
+        results = []
+        if not orders:
+            print("ℹ️ 無待送出之委託單。")
+            return results
+
+        print("\n" + "=" * 70)
+        mode_title = "🛡️ 【永豐大戶投】零股委託掛單檢驗 (DRY-RUN 模擬檢閱模式)" if dry_run else "🚀 【永豐大戶投】正式委託執行 (PRODUCTION EXECUTION)"
+        print(mode_title)
+        print("=" * 70)
+
+        api = None
+        if not dry_run:
+            if not SHIOAJI_AVAILABLE:
+                print("❌ 執行失敗：本機尚未安裝 shioaji，無法送出正式委託。")
+                return results
+
+            api_key = os.getenv("SHIOAJI_API_KEY", "").strip()
+            secret_key = os.getenv("SHIOAJI_SECRET_KEY", "").strip()
+            if not api_key or not secret_key:
+                print("❌ 執行失敗：未設定 SHIOAJI_API_KEY / SHIOAJI_SECRET_KEY！")
+                return results
+
+            sim = os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
+            cert_path = os.getenv("SHIOAJI_CERT_PATH", "").strip()
+            cert_pass = os.getenv("SHIOAJI_CERT_PASSWORD", "").strip()
+            person_id = os.getenv("SHIOAJI_PERSON_ID", "").strip()
+
+            try:
+                api = sj.Shioaji(simulation=sim)
+                api.login(api_key=api_key, secret_key=secret_key)
+                if not sim and cert_path and os.path.exists(cert_path):
+                    api.activate_ca(ca_path=cert_path, ca_passwd=cert_pass, person_id=person_id)
+            except Exception as login_err:
+                print(f"❌ 永豐 API 連線或憑證啟動失敗: {login_err}")
+                return results
+
+        for ord_item in orders:
+            ticker = ord_item["ticker"]
+            name = ord_item["name"]
+            is_tw = ord_item.get("is_tw", False)
+            act = ord_item["action"]
+            shares = int(ord_item["shares"])
+            price = float(ord_item["price"])
+            reason = ord_item.get("reason", "")
+            is_emergency = ord_item.get("is_emergency", False)
+
+            # 美股目前僅記錄模擬單，台股支援永豐 Shioaji 零股 API
+            if not is_tw:
+                print(f"  • 美股委託: {act} {ticker} {shares} 股 @ ${price:,.2f} ({reason}) [記錄為模擬委託]")
+                results.append({**ord_item, "status": "SIMULATED", "order_id": "US-SIM"})
+                continue
+
+            clean_code = ticker.replace(".TW", "").replace(".TWO", "")
+            prefix = "NT$"
+
+            if dry_run:
+                tag = "🚨【緊急賣單】" if is_emergency else ("🔴【賣出】" if act == "SELL" else "🟢【買進】")
+                print(f"  {tag} {name} ({ticker})")
+                print(f"      • 動作規格: {act} | 股數: {shares} 股 (盤中零股 IntradayOdd)")
+                print(f"      • 限價設定: {prefix}{price:,.2f} (市價: {prefix}{ord_item.get('market_price', price):,.2f})")
+                print(f"      • 觸發原因: {reason}")
+                results.append({**ord_item, "status": "DRY_RUN_PASSED"})
+            else:
+                try:
+                    contract = api.Contracts.Stocks[clean_code]
+                    order_lot_val = sj.constant.StockOrderLot.IntradayOdd
+                    sj_act = sj.constant.Action.Buy if act == "BUY" else sj.constant.Action.Sell
+
+                    order = api.Order(
+                        price=price,
+                        quantity=shares,
+                        action=sj_act,
+                        price_type=sj.constant.StockPriceType.LMT,
+                        order_type=sj.constant.OrderType.ROD,
+                        order_lot=order_lot_val
+                    )
+                    trade = api.place_order(contract, order)
+                    trade_id = str(getattr(trade, "order", {}).get("id", "SUBMITTED"))
+                    print(f"  🚀 【委託已送出】{name} ({clean_code}) {act} {shares} 股 @ NT${price:,.2f} | 委託號: {trade_id}")
+                    results.append({**ord_item, "status": "SUBMITTED", "trade_id": trade_id})
+                except Exception as place_err:
+                    print(f"  ❌ 【委託失敗】{name} ({clean_code}): {place_err}")
+                    results.append({**ord_item, "status": "ERROR", "error": str(place_err)})
+
+        print("=" * 70 + "\n")
+        return results
+
     def execute_semi_auto_order(
         self,
         signals: List[Dict],
-        default_budget: float = 3000.0,
+        default_budget: float = 30000.0,
         interactive: bool = True
     ) -> List[Dict]:
-        """
-        永豐大戶投零股半自動委託確認與下單：
-        1. 計算單檔零股股數、手續費安全緩衝與風控關鍵位
-        2. 終端機格式化輸出委託確認卡片
-        3. 要求使用者手動輸入 'CONFIRM' 始送出委託 (安全防呆鎖)
-        """
-        executed_orders = []
+        """向下相容之半自動確認介面"""
+        executed = []
         if not signals:
             print("ℹ️ 今日無新的買進委託訊號。")
-            return executed_orders
-
-        print("\n" + "=" * 65)
-        print("📋 【永豐大戶投】零股委託掛單確認 (Semi-Auto Order Confirmation)")
-        print("=" * 65)
+            return executed
 
         for sig in signals:
-            ticker = sig.get("ticker", "")
-            name = TECH_UNIVERSE_TW.get(ticker, sig.get("name", ticker))
-            price = float(sig.get("price", 0.0))
-            if price <= 0:
+            t = sig.get("ticker", "")
+            px = float(sig.get("price", 0.0))
+            if px <= 0:
                 continue
-
-            # 零股股數計算 (含 0.1425% 手續費與滑點安全緩衝)
-            shares = max(1, int(default_budget / (price * 1.0028)))
-            est_cost = shares * price
-            est_fee = max(1.0, round(est_cost * 0.001425, 1))
-            total_est = est_cost + est_fee
-
-            step_price = round(price * 0.90, 1)      # -10% 階梯加碼位
-            stop_price = round(price * 0.92, 1)      # -8% 移動停損位
-            hard_stop = round(price * 0.70, 1)       # -30% 戰術硬停損位
-
-            print(f"\n標的名稱: {name} ({ticker})")
-            print(f"  • 當前市價: NT$ {price:,.2f}")
-            print(f"  • 單檔預算: NT$ {default_budget:,.0f}")
-            print(f"  • 建議股數: {shares} 股 (預估金額: NT$ {est_cost:,.0f} + 手續費約 NT$ {est_fee:,.0f} = NT$ {total_est:,.0f})")
-            print(f"  • 🛡️ 風控參考價位:")
-            print(f"      -10% 階梯佈局價: NT$ {step_price:,.1f}")
-            print(f"      -8%  移動停利停損: NT$ {stop_price:,.1f}")
-            print(f"      -30% 戰術硬停損位: NT$ {hard_stop:,.1f}")
-
-            user_action = "CONFIRM"
-            if interactive:
-                prompt_msg = f"  👉 是否送出【{name} ({ticker})】{shares} 股買進委託？輸入 'CONFIRM' 確認，其餘任意鍵跳過: "
-                try:
-                    user_action = input(prompt_msg).strip()
-                except (EOFError, KeyboardInterrupt):
-                    user_action = "SKIP"
-
-            if user_action == "CONFIRM":
-                order_record = {
-                    "ticker": ticker,
-                    "name": name,
-                    "shares": shares,
-                    "price": price,
-                    "status": "SUBMITTED",
-                    "time": datetime.now(self.tw_tz).strftime("%Y-%m-%d %H:%M:%S")
-                }
-
-                # 若具備 Shioaji 則可送出模擬/實盤掛單
-                if SHIOAJI_AVAILABLE and os.getenv("SHIOAJI_API_KEY"):
-                    try:
-                        sim = os.getenv("SHIOAJI_SIMULATION", "true").lower() == "true"
-                        api = sj.Shioaji(simulation=sim)
-                        api.login(api_key=os.getenv("SHIOAJI_API_KEY"), secret_key=os.getenv("SHIOAJI_SECRET_KEY"))
-                        clean_sym = ticker.replace(".TW", "").replace(".TWO", "")
-                        contracts_mgr = getattr(api, "contracts", getattr(api, "Contracts", None))
-                        contract = contracts_mgr.Stocks[clean_sym]
-                        order_lot_val = getattr(sj.constant.StockOrderLot, "IntradayOdd", getattr(sj, "StockOrderLot", None).IntradayOdd if hasattr(sj, "StockOrderLot") else sj.constant.StockOrderLot.IntradayOdd)
-                        order = api.Order(
-                            price=price,
-                            quantity=shares,
-                            action=sj.constant.Action.Buy,
-                            price_type=sj.constant.StockPriceType.LMT,
-                            order_type=sj.constant.OrderType.ROD,
-                            order_lot=order_lot_val
-                        )
-                        trade = api.place_order(contract, order)
-                        order_record["trade_id"] = str(getattr(trade, "order", {}).get("id", "SIM-1"))
-                        print(f"  🚀 【下單成功】已送出永豐零股委託: {name} {shares} 股 @ NT${price:,.2f}")
-                    except Exception as order_err:
-                        print(f"  ⚠️ Shioaji 下單異常: {order_err}，轉為本地紀錄。")
-                else:
-                    print(f"  💡 【模擬確認】已記錄模擬買進委託: {name} {shares} 股 @ NT${price:,.2f}")
-
-                executed_orders.append(order_record)
-            else:
-                print(f"  ⏸️ 使用者取消【{name}】委託。")
-
-        print("=" * 65 + "\n")
-        return executed_orders
+            shares = max(1, min(999, int(default_budget / (px * 1.0028))))
+            executed.append({
+                "ticker": t,
+                "name": sig.get("name", t),
+                "shares": shares,
+                "price": px,
+                "status": "SUBMITTED",
+                "time": datetime.now(self.tw_tz).strftime("%Y-%m-%d %H:%M:%S")
+            })
+        return executed

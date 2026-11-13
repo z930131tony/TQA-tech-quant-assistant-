@@ -1,55 +1,86 @@
 """
-個人投資組合與風控追蹤模組 (Portfolio & Risk Tracker - 雙軌風控：-8% 移動停利停損 + -30% 戰術硬停損)
+個人投資組合與風控追蹤模組 (Portfolio & Risk Tracker - 雙軌風控與帳戶層級回撤防護)
 功能：
-1. 讀取 portfolio.json 個人持股 (股數、買進成本、進場日期)
-2. 比對現價、50MA 生命線、波段最高價回檔 (8%) 與買進成本絕對虧損 (30%)
-3. 產生雙軌停損警報與 LINE 推播文案
-4. 輸出網頁端個人資產卡片 HTML
+1. 讀取與持久化 portfolio.json 個人持股與帳戶風控狀態
+   - 個股：shares, cost_price, entry_date, peak_price (歷史最高價)
+   - 帳戶：peak_equity, current_drawdown_pct, risk_scaling_factor, cash
+2. 比對現價、50MA 生命線、波段最高價回檔 (-8%) 與買進成本絕對虧損 (-30%)
+3. 動態倉位縮放 (Drawdown Scaling)：回撤 >= 18% 降為 0.50，回撤 >= 25% 降為 0.25，回升 < 10% 恢復 1.0
+4. 產生雙軌停損警報與 LINE 推播文案
+5. 輸出網頁端個人資產卡片 HTML
 """
 import os
 import json
-from typing import Dict, List, Optional
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
 import numpy as np
+import pytz
 from src.config import TECH_UNIVERSE_TW, config
 
 PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portfolio.json")
 
 class PortfolioTracker:
     @classmethod
-    def load_portfolio(cls, filepath: str = PORTFOLIO_FILE) -> List[Dict]:
+    def calculate_risk_scaling_factor(cls, drawdown_pct: float, current_factor: float = 1.0) -> float:
         """
-        讀取個人持股設定檔
-        優先級：
-        1. Google Sheets CSV (環境變數 PORTFOLIO_SHEET_URL)
-        2. Supabase REST API (環境變數 SUPABASE_URL + SUPABASE_KEY)
-        3. 本地檔案 (portfolio.json)
+        帳戶層級動態倉位縮放係數 (Portfolio Drawdown Scaling):
+        - 回撤 >= 25.0%: 降為 0.25 (極致防禦，保留 75% 現金)
+        - 回撤 >= 18.0%: 降為 0.50 (半倉防禦，保留 50% 現金)
+        - 回撤 < 10.0%: 恢復 1.00 (多頭常態)
+        - 10.0% ~ 18.0%: 維持既有狀態 (具備滯後緩衝 Hysteresis，避免在邊界頻繁抖動)
         """
-        # 1. Google Sheets 雲端試算表讀取 (手機端隨時開 App 修改)
+        if drawdown_pct >= 25.0:
+            return 0.25
+        elif drawdown_pct >= 18.0:
+            return 0.50
+        elif drawdown_pct < 10.0:
+            return 1.0
+        return current_factor
+
+    @classmethod
+    def load_portfolio_state(cls, filepath: str = PORTFOLIO_FILE) -> Dict[str, Any]:
+        """
+        讀取完整投資組合狀態字典（含帳戶層級風控指標與個股部位）
+        支援向下相容與自動資料遷移
+        """
+        default_state = {
+            "positions": [],
+            "peak_equity": 100000.0,
+            "current_drawdown_pct": 0.0,
+            "risk_scaling_factor": 1.0,
+            "cash": 30000.0,
+            "last_updated": ""
+        }
+
+        # 1. 優先檢查雲端 Google Sheets
         sheet_url = os.getenv("PORTFOLIO_SHEET_URL", "").strip()
         if sheet_url:
             try:
                 df = pd.read_csv(sheet_url)
                 df.columns = [str(c).strip().lower() for c in df.columns]
-                if {"ticker", "shares", "cost_price"}.issubset(df.columns):
-                    df = df.dropna(subset=["ticker", "shares", "cost_price"])
+                cost_col = "cost_price" if "cost_price" in df.columns else ("entry_price" if "entry_price" in df.columns else None)
+                if cost_col and {"ticker", "shares"}.issubset(df.columns):
+                    df = df.dropna(subset=["ticker", "shares", cost_col])
                     positions = []
                     for _, row in df.iterrows():
-                        entry_val = ""
-                        if "entry_date" in row and not pd.isna(row["entry_date"]):
-                            entry_val = str(row["entry_date"]).strip()
+                        entry_val = str(row["entry_date"]).strip() if ("entry_date" in row and not pd.isna(row["entry_date"])) else ""
+                        c_px = float(row[cost_col])
+                        p_px = float(row["peak_price"]) if ("peak_price" in row and not pd.isna(row["peak_price"])) else c_px
                         positions.append({
                             "ticker": str(row["ticker"]).strip(),
                             "shares": float(row["shares"]),
-                            "cost_price": float(row["cost_price"]),
-                            "entry_date": entry_val
+                            "cost_price": c_px,
+                            "entry_date": entry_val,
+                            "peak_price": p_px
                         })
                     if positions:
-                        return positions
+                        default_state["positions"] = positions
+                        return default_state
             except Exception as e:
                 print(f"[警告] 讀取 Google Sheets 雲端持倉失敗，切換回本地: {e}")
 
-        # 2. Supabase 雲端資料庫讀取
+        # 2. 雲端 Supabase
         supabase_url = os.getenv("SUPABASE_URL", "").strip()
         supabase_key = os.getenv("SUPABASE_KEY", "").strip()
         if supabase_url and supabase_key:
@@ -64,42 +95,120 @@ class PortfolioTracker:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode("utf-8"))
                         if isinstance(data, list) and len(data) > 0:
-                            return [{
-                                "ticker": str(r["ticker"]).strip(),
-                                "shares": float(r["shares"]),
-                                "cost_price": float(r["cost_price"]),
-                                "entry_date": str(r.get("entry_date", "")).strip() if r.get("entry_date") else ""
-                            } for r in data]
+                            positions = []
+                            for r in data:
+                                c_px = float(r.get("cost_price", r.get("entry_price", 0.0)))
+                                positions.append({
+                                    "ticker": str(r["ticker"]).strip(),
+                                    "shares": float(r["shares"]),
+                                    "cost_price": c_px,
+                                    "entry_date": str(r.get("entry_date", "")).strip() if r.get("entry_date") else "",
+                                    "peak_price": float(r.get("peak_price", c_px))
+                                })
+                            default_state["positions"] = positions
+                            return default_state
             except Exception as e:
                 print(f"[警告] 讀取 Supabase 雲端持倉失敗，切換回本地: {e}")
 
-        # 3. 本地回退 (portfolio.json)
+        # 3. 本地檔案 (portfolio.json)
         if not os.path.exists(filepath):
-            return []
+            return default_state
+
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return data.get("positions", [])
+
+            if isinstance(data, list):
+                # 兼容極舊版直接存 list 的情況
+                raw_positions = data
+                state = default_state.copy()
+            elif isinstance(data, dict):
+                raw_positions = data.get("positions", [])
+                state = {
+                    "positions": [],
+                    "peak_equity": float(data.get("peak_equity", 100000.0)),
+                    "current_drawdown_pct": float(data.get("current_drawdown_pct", 0.0)),
+                    "risk_scaling_factor": float(data.get("risk_scaling_factor", 1.0)),
+                    "cash": float(data.get("cash", 30000.0)),
+                    "last_updated": str(data.get("last_updated", ""))
+                }
+            else:
+                return default_state
+
+            # 補齊個股欄位
+            clean_positions = []
+            for p in raw_positions:
+                c_px = float(p.get("cost_price", p.get("entry_price", 0.0)))
+                clean_positions.append({
+                    "ticker": str(p.get("ticker", "")).strip(),
+                    "shares": float(p.get("shares", 0)),
+                    "cost_price": c_px,
+                    "entry_date": str(p.get("entry_date", "")).strip(),
+                    "peak_price": float(p.get("peak_price", c_px))
+                })
+            state["positions"] = clean_positions
+            return state
+
         except Exception as e:
             print(f"[警告] 讀取 portfolio.json 失敗: {e}")
-            return []
+            return default_state
 
     @classmethod
-    def save_portfolio(cls, positions: List[Dict], filepath: str = PORTFOLIO_FILE):
-        """儲存個人持股設定檔 (同時寫入本地快取，若有 Webhook 則同步雲端)"""
+    def load_portfolio(cls, filepath: str = PORTFOLIO_FILE) -> List[Dict]:
+        """讀取持股部位清單 (向下相容)"""
+        state = cls.load_portfolio_state(filepath)
+        return state.get("positions", [])
+
+    @classmethod
+    def save_portfolio(
+        cls, 
+        positions: List[Dict], 
+        filepath: str = PORTFOLIO_FILE,
+        extra_state: Optional[Dict] = None
+    ):
+        """
+        儲存持股設定檔與帳戶風控狀態
+        自動保留並更新 peak_equity, current_drawdown_pct, risk_scaling_factor
+        """
+        # 先讀取現有 state
+        current_state = cls.load_portfolio_state(filepath)
+        
+        # 規範化持倉列表
+        clean_positions = []
+        for p in positions:
+            c_px = float(p.get("cost_price", p.get("entry_price", 0.0)))
+            pk_px = float(p.get("peak_price", c_px))
+            clean_positions.append({
+                "ticker": str(p.get("ticker", "")).strip(),
+                "shares": float(p.get("shares", 0)),
+                "cost_price": c_px,
+                "entry_date": str(p.get("entry_date", "")).strip(),
+                "peak_price": max(pk_px, c_px)
+            })
+
+        payload = {
+            "positions": clean_positions,
+            "peak_equity": float(extra_state.get("peak_equity", current_state.get("peak_equity", 100000.0))) if extra_state else current_state.get("peak_equity", 100000.0),
+            "current_drawdown_pct": float(extra_state.get("current_drawdown_pct", current_state.get("current_drawdown_pct", 0.0))) if extra_state else current_state.get("current_drawdown_pct", 0.0),
+            "risk_scaling_factor": float(extra_state.get("risk_scaling_factor", current_state.get("risk_scaling_factor", 1.0))) if extra_state else current_state.get("risk_scaling_factor", 1.0),
+            "cash": float(extra_state.get("cash", current_state.get("cash", 30000.0))) if extra_state else current_state.get("cash", 30000.0),
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
         try:
             with open(filepath, "w", encoding="utf-8") as f:
-                json.dump({"positions": positions}, f, ensure_ascii=False, indent=2)
+                json.dump(payload, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[警告] 寫入本地 portfolio.json 失敗: {e}")
 
+        # 同步 Webhook
         webhook_url = os.getenv("PORTFOLIO_WEBHOOK_URL", "").strip()
         if webhook_url:
             try:
                 import urllib.request
                 req = urllib.request.Request(
                     webhook_url,
-                    data=json.dumps({"positions": positions}).encode("utf-8"),
+                    data=json.dumps(payload).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                     method="POST"
                 )
@@ -108,26 +217,36 @@ class PortfolioTracker:
                 print(f"[警告] 同步至雲端 Webhook 失敗: {e}")
 
     @classmethod
-    def evaluate_portfolio(cls, dataset: Dict[str, pd.DataFrame]) -> List[Dict]:
+    def evaluate_portfolio(
+        cls, 
+        dataset: Dict[str, pd.DataFrame],
+        save_state: bool = True
+    ) -> List[Dict]:
         """
-        評估個人每檔持股的損益與出場風控條件
-        風控規則：
-        1. 跌破 50MA：中期生命線跌破，趨勢轉弱。
-        2. 自買進後波段高點回檔 >= 8%：觸發移動停利/停損。
-        3. 自買進成本累積虧損 >= 30%：觸發戰術絕對硬停損 (Hard Stop-Loss)。
+        評估個人每檔持股的損益、更新 peak_price 與雙軌停損風控條件
+        同時計算帳戶總淨值、峰值淨值、總回撤與動態縮放係數 (Drawdown Scaling)
         """
-        positions = cls.load_portfolio()
+        state = cls.load_portfolio_state()
+        positions = state.get("positions", [])
         if not positions:
             return []
 
+        tw_tz = pytz.timezone("Asia/Taipei")
+        today_str = datetime.now(tw_tz).strftime("%Y-%m-%d")
+
         evaluated = []
+        updated_positions = []
+        total_market_value = 0.0
+
         for pos in positions:
             ticker = pos.get("ticker", "").strip()
             shares = float(pos.get("shares", 0))
-            cost_price = float(pos.get("cost_price", 0.0))
+            cost_price = float(pos.get("cost_price", pos.get("entry_price", 0.0)))
             entry_date = pos.get("entry_date", "")
 
             if ticker not in dataset or dataset[ticker].empty:
+                # 若無最新行情，原樣保留
+                updated_positions.append(pos)
                 continue
 
             df = dataset[ticker].copy()
@@ -141,42 +260,64 @@ class PortfolioTracker:
 
             # 計算 50MA
             sma50 = float(df["close"].rolling(50).mean().iloc[-1])
-            is_above_50ma = curr_price >= sma50
+            is_above_50ma = (curr_price >= sma50)
 
-            # 計算買進之後的波段最高價 (僅搜尋進場日隔天之後的最高價，避開進場日上影線誤判)
+            # 更新歷史波段最高價 (peak_price)
+            # 僅搜尋進場日隔天之後的最高價，避開進場日上影線誤判
             if entry_date:
                 sub_df = df.loc[df.index > pd.to_datetime(entry_date)]
                 post_entry_high = float(sub_df["high"].max()) if not sub_df.empty else cost_price
             else:
                 post_entry_high = float(df["high"].tail(60).max())
 
-            peak_price = max(post_entry_high, curr_price, cost_price)
-            drawdown_from_peak = ((curr_price - peak_price) / peak_price) * 100
-            trailing_stop_triggered = (drawdown_from_peak <= -8.0)
+            prev_peak = float(pos.get("peak_price", cost_price))
+            peak_price = max(prev_peak, post_entry_high, curr_price, cost_price)
 
-            # 計算損益
+            # 計算自高點回檔幅度
+            drawdown_from_peak = ((curr_price - peak_price) / peak_price) * 100.0
+
+            # 計算持股損益 (台幣換算：美股以匯率 32.5 換算為台幣計入總淨值)
             market_val = shares * curr_price
             cost_val = shares * cost_price
             unrealized_pnl = market_val - cost_val
-            return_pct = ((curr_price - cost_price) / cost_price * 100) if cost_price > 0 else 0.0
+            return_pct = ((curr_price - cost_price) / cost_price * 100.0) if cost_price > 0 else 0.0
+            market_val_twd = market_val if is_tw else (market_val * 32.5)
+            total_market_value += market_val_twd
 
-            # 30% 戰術絕對硬停損
+            # ----------------------------------------------------
+            # 雙軌停損判定
+            # 1. 戰術絕對硬停損 (-30%)
+            # 2. 移動停利停損 (-8%，進場隔日後啟動)
+            # ----------------------------------------------------
             hard_stop_triggered = (return_pct <= -30.0)
+            
+            # 移動停損僅在進場隔日後生效 (T+1 以後)
+            is_past_entry_day = True
+            if entry_date:
+                latest_date_str = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])[:10]
+                is_past_entry_day = (latest_date_str > entry_date)
+            trailing_stop_triggered = (drawdown_from_peak <= -8.0) and is_past_entry_day
 
-            # 警報判斷
+            # 警報彙整
             alerts = []
             if hard_stop_triggered:
-                alerts.append("🔴 觸發-30%戰術絕對硬停損")
+                alerts.append("🚨 戰術絕對硬停損 (虧損達30%)")
             elif trailing_stop_triggered:
-                alerts.append(f"高點回檔已達 {abs(drawdown_from_peak):.1f}% (滿8%停損)")
+                alerts.append(f"🛡️ 移動停損平倉 (自高點回檔達8% / 現回檔{abs(drawdown_from_peak):.1f}%)")
 
             if not is_above_50ma:
-                alerts.append("跌破50MA生命線")
+                alerts.append("📉 跌破50MA生命線")
 
             has_alert = len(alerts) > 0
             alert_text = " + ".join(alerts) if has_alert else "多頭軌道安全"
 
-            evaluated.append({
+            # 緩衝安全距離計算 (供 UI 與診斷面板顯示)
+            dist_to_trailing = drawdown_from_peak - (-8.0)   # 若為正代表距 -8% 還有多少 % 安全緩衝
+            dist_to_hard = return_pct - (-30.0)              # 若為正代表距 -30% 還有多少 % 安全緩衝
+            trailing_stop_price = peak_price * 0.92
+            hard_stop_price = cost_price * 0.70
+
+            eval_item = {
                 "ticker": ticker,
                 "name": name,
                 "is_tw": is_tw,
@@ -189,27 +330,64 @@ class PortfolioTracker:
                 "return_pct": return_pct,
                 "peak_price": peak_price,
                 "drawdown_from_peak": drawdown_from_peak,
+                "dist_to_trailing": dist_to_trailing,
+                "dist_to_hard": dist_to_hard,
+                "trailing_stop_price": trailing_stop_price,
+                "hard_stop_price": hard_stop_price,
                 "sma50": sma50,
                 "is_above_50ma": is_above_50ma,
                 "trailing_stop_triggered": trailing_stop_triggered,
                 "hard_stop_triggered": hard_stop_triggered,
                 "has_alert": has_alert,
-                "alert_text": alert_text
-            })
+                "alert_text": alert_text,
+                "entry_date": entry_date,
+                "data_date": df.index[-1].strftime("%Y-%m-%d")
+            }
+            evaluated.append(eval_item)
+
+            # 更新持倉字典中的 peak_price
+            pos_copy = pos.copy()
+            pos_copy["peak_price"] = peak_price
+            pos_copy["cost_price"] = cost_price
+            updated_positions.append(pos_copy)
+
+        # ----------------------------------------------------
+        # 帳戶層級回撤與倉位縮放計算 (Portfolio Drawdown Scaling)
+        # ----------------------------------------------------
+        cash = float(state.get("cash", 30000.0))
+        current_equity = total_market_value + cash
+        prev_peak_equity = float(state.get("peak_equity", 100000.0))
+        peak_equity = max(prev_peak_equity, current_equity)
+
+        drawdown_pct = max(0.0, ((peak_equity - current_equity) / peak_equity) * 100.0) if peak_equity > 0 else 0.0
+        cur_scaling = float(state.get("risk_scaling_factor", 1.0))
+        risk_scaling_factor = cls.calculate_risk_scaling_factor(drawdown_pct, cur_scaling)
+
+        if save_state:
+            cls.save_portfolio(
+                updated_positions,
+                extra_state={
+                    "peak_equity": round(peak_equity, 2),
+                    "current_drawdown_pct": round(drawdown_pct, 2),
+                    "risk_scaling_factor": risk_scaling_factor,
+                    "cash": round(cash, 2)
+                }
+            )
 
         return evaluated
 
     @classmethod
     def format_line_notification(cls, evaluated_positions: List[Dict], market_type: str = "TW") -> str:
-        """
-        產生 LINE 推播中的個人持股風控摘要文字
-        market_type: 'TW' 或 'US'
-        """
+        """產生 LINE 推播中的個人持股風控摘要文字"""
         filtered = [p for p in evaluated_positions if (p["is_tw"] if market_type == "TW" else not p["is_tw"])]
         if not filtered:
             return ""
 
-        lines = ["💼 【個人自訂持股風控監控】"]
+        state = cls.load_portfolio_state()
+        lines = [
+            f"💼 【個人自訂持股風控監控 - {market_type}】",
+            f"• 帳戶最高淨值: ${state.get('peak_equity', 0):,.0f} | 總回撤: {state.get('current_drawdown_pct', 0):.1f}% | 倉位係數: {state.get('risk_scaling_factor', 1.0):.2f}"
+        ]
         alerts = [p for p in filtered if p["has_alert"]]
         
         if alerts:
@@ -229,7 +407,7 @@ class PortfolioTracker:
     @classmethod
     def generate_portfolio_html(cls, evaluated_positions: List[Dict], market_type: str = "TW") -> str:
         """產生網頁儀表板中的持股卡片 HTML"""
-        filtered = [p for p in evaluated_positions if (p["is_tw"] if market_type == "TW" else not p["is_tw"])]
+        filtered = [p for p in evaluated_positions if (p.get("is_tw", False) if market_type == "TW" else not p.get("is_tw", False))]
         if not filtered:
             return """
             <div style="background: #182238; border: 1px dashed #243049; border-radius: 10px; padding: 20px; text-align: center; color: #64748b;">

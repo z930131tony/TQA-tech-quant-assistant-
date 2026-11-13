@@ -30,30 +30,127 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
         body { background-color: #0b0f19; color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; padding-bottom: 60px; }
         
-        .container { width: 100%; max-width: 1420px; margin: 0 auto; padding: 16px 20px; }
+        .container { width: 100%; max-width: 1440px; margin: 0 auto; padding: 16px 20px; }
         
-        header { position: sticky; top: 0; z-index: 30; background: #131b2e; border-bottom: 1px solid #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
+        header { position: sticky; top: 0; z-index: 30; background: rgba(19, 27, 46, 0.92); backdrop-filter: blur(12px); border-bottom: 1px solid #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
         .header-left { display: flex; align-items: center; gap: 12px; }
-        .logo-tag { background: #2563eb; color: #fff; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px; font-family: monospace; }
+        .logo-tag { background: #2563eb; color: #fff; font-size: 12px; font-weight: bold; padding: 3px 8px; border-radius: 4px; font-family: monospace; letter-spacing: 0.5px; }
         .title { font-size: 19px; font-weight: bold; color: #f8fafc; }
         .subtitle { font-size: 13px; color: #94a3b8; }
         .update-box { text-align: right; }
         .update-label { font-size: 11px; color: #64748b; }
         .update-time { font-size: 13px; font-family: monospace; color: #cbd5e1; }
         
+        /* 標籤導覽 (Tabs) */
         .tabs { display: flex; border-bottom: 1px solid #1e293b; margin: 16px 0 20px 0; gap: 8px; }
-        .tab-btn { flex: 1; max-width: 240px; padding: 12px 16px; background: none; border: none; color: #64748b; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center; border-bottom: 3px solid transparent; transition: all 0.15s; }
+        .tab-btn { flex: 1; max-width: 260px; padding: 12px 18px; background: none; border: none; color: #64748b; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center; border-bottom: 3px solid transparent; transition: all 0.15s; }
         .tab-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; }
         
         .market-pill { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; margin-right: 6px; font-family: monospace; display: inline-block; vertical-align: middle; }
         .tw-pill { background: #064e3b; color: #34d399; border: 1px solid #059669; }
         .us-pill { background: #1e3a8a; color: #60a5fa; border: 1px solid #2563eb; }
         
-        .desktop-grid { display: flex; flex-direction: column; gap: 20px; }
-        @media (min-width: 992px) {
-            .desktop-grid { display: grid; grid-template-columns: 460px 1fr; gap: 24px; align-items: start; }
+        /* 頂部大盤狀態列 */
+        .market-status-bar {
+            background: linear-gradient(90deg, #131b2e 0%, #17233d 100%);
+            border: 1px solid #1e293b;
+            border-radius: 12px;
+            padding: 12px 18px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
         }
-        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .status-title { color: #94a3b8; }
+        .status-date { font-size: 12px; color: #64748b; font-weight: normal; margin-left: 6px; }
+
+        /* 策略四大績效指標卡片 */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        @media (min-width: 768px) {
+            .kpi-grid {
+                grid-template-columns: repeat(4, 1fr);
+                gap: 16px;
+            }
+        }
+        .kpi-card {
+            background: #131b2e;
+            border: 1px solid #1e293b;
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+        .kpi-card:hover {
+            border-color: #38bdf8;
+            transform: translateY(-2px);
+        }
+        .kpi-label {
+            font-size: 12px;
+            color: #94a3b8;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .kpi-val {
+            font-size: 22px;
+            font-weight: bold;
+            font-family: monospace;
+            letter-spacing: -0.5px;
+            margin-bottom: 2px;
+        }
+        .kpi-sub {
+            font-size: 11px;
+            color: #64748b;
+        }
+
+        /* 雙欄決策戰情室 (今日操作指引 + AI 多空對抗) */
+        .decision-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        @media (min-width: 992px) {
+            .decision-grid {
+                display: grid;
+                grid-template-columns: 460px 1fr;
+                gap: 24px;
+                align-items: stretch;
+            }
+        }
+
+        /* 雙欄深度行情與淨值 (排序總表 + 資產淨值走勢) */
+        .deepdive-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        @media (min-width: 992px) {
+            .deepdive-grid {
+                display: grid;
+                grid-template-columns: 1.15fr 0.85fr;
+                gap: 24px;
+                align-items: stretch;
+            }
+        }
+
+        /* 通用卡片容器 */
         .card { background: #131b2e; border: 1px solid #1e293b; border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; }
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .card-title { font-size: 15px; font-weight: bold; color: #cbd5e1; display: flex; align-items: center; gap: 8px; }
@@ -63,6 +160,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .badge-bull { background: #064e3b; color: #34d399; border: 1px solid #059669; }
         .badge-bear { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
         
+        /* 推薦標的列表 */
         .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: #182238; border: 1px solid #243049; border-radius: 10px; margin-bottom: 10px; cursor: pointer; transition: all 0.15s; }
         .stock-item:hover { background: #1f2b45; border-color: #38bdf8; }
         .stock-item:active { transform: scale(0.99); }
@@ -70,16 +168,88 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         .rank-num { width: 30px; height: 30px; background: #28354f; color: #cbd5e1; font-size: 13px; font-weight: bold; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-family: monospace; }
         .stock-name { font-size: 15px; font-weight: bold; color: #f1f5f9; }
         .stock-sub { font-size: 13px; color: #94a3b8; font-family: monospace; margin-top: 2px; }
-        
-        .grid-4 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; text-align: center; font-family: monospace; }
-        @media (min-width: 480px) and (max-width: 959px) { .grid-4 { grid-template-columns: repeat(4, 1fr); } }
-        .grid-item { background: #182238; padding: 12px; border-radius: 8px; border: 1px solid #1e293b; }
-        .grid-label { font-size: 11px; color: #64748b; margin-bottom: 4px; }
-        .grid-val { font-size: 17px; font-weight: bold; }
-        
+
+        /* 表格搜尋與快篩工具列 */
+        .table-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .search-box {
+            position: relative;
+            flex: 1;
+            min-width: 180px;
+            max-width: 280px;
+        }
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: #64748b;
+            pointer-events: none;
+        }
+        .search-input {
+            width: 100%;
+            background: #182238;
+            border: 1px solid #2d3b55;
+            border-radius: 8px;
+            padding: 7px 10px 7px 30px;
+            font-size: 12px;
+            color: #f1f5f9;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .search-input:focus {
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.15);
+        }
+        .filter-group {
+            display: flex;
+            gap: 6px;
+        }
+        .filter-btn {
+            background: #182238;
+            border: 1px solid #2d3b55;
+            color: #94a3b8;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .filter-btn:hover {
+            color: #f8fafc;
+            border-color: #475569;
+        }
+        .filter-btn.active {
+            background: #2563eb;
+            color: #fff;
+            border-color: #3b82f6;
+        }
+
+        /* 滾動鎖定表頭 (Sticky Table Header) */
         .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .table-scrollable {
+            max-height: 520px;
+            overflow-y: auto;
+            border-radius: 8px;
+            border: 1px solid #1e293b;
+        }
         table { width: 100%; border-collapse: collapse; font-size: 14px; }
         th { text-align: left; padding: 12px 10px; color: #64748b; border-bottom: 1px solid #1e293b; font-weight: 600; white-space: nowrap; }
+        .table-scrollable thead th {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: #151e33;
+            box-shadow: 0 1px 0 #1e293b;
+        }
         td { padding: 13px 10px; border-bottom: 1px solid #182238; white-space: nowrap; }
         tr.clickable { cursor: pointer; transition: background 0.1s; }
         tr.clickable:hover { background: #1a253c; }
@@ -92,6 +262,214 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         
         .desktop-only { display: none; }
         @media (min-width: 768px) { .desktop-only { display: table-cell; } }
+
+        /* 策略淨值圖例與備註卡片 */
+        .chart-legend {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-strat { color: #38bdf8; }
+        .legend-bench { color: #94a3b8; }
+        .strat-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #38bdf8;
+            border-radius: 2px;
+        }
+        .bench-line {
+            display: inline-block;
+            width: 12px;
+            height: 2px;
+            background: #94a3b8;
+            border-top: 1px dashed #94a3b8;
+        }
+        .equity-hud-text {
+            font-family: monospace;
+            font-size: 11px;
+            color: #94a3b8;
+            margin-bottom: 6px;
+            min-height: 18px;
+        }
+        .equity-chart-box {
+            height: 230px;
+            width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #0b0f19;
+            border: 1px solid #182238;
+        }
+        .strategy-notes {
+            margin-top: 14px;
+            border-top: 1px dashed #1e293b;
+            padding-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .note-pill {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            background: #182238;
+            border: 1px solid #23304a;
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-size: 12px;
+            color: #cbd5e1;
+            line-height: 1.4;
+        }
+        .note-icon {
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+
+        /* 🤖 TradingAgents AI 多空對抗辯論卡片 */
+        .debate-card {
+            background: #182238;
+            border: 1px solid #28354f;
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+            transition: border-color 0.15s;
+        }
+        .debate-card:hover {
+            border-color: #3b82f6;
+        }
+        .debate-card:last-child {
+            margin-bottom: 0;
+        }
+        .debate-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .debate-stock-title {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .debate-stock-name {
+            font-weight: bold;
+            font-size: 15px;
+            color: #f8fafc;
+            cursor: pointer;
+            transition: color 0.15s;
+        }
+        .debate-stock-name:hover {
+            color: #38bdf8;
+        }
+        .debate-stock-ticker {
+            font-family: monospace;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+        .debate-stock-price {
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 14px;
+            color: #cbd5e1;
+            margin-left: 4px;
+        }
+        .debate-tags {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .ai-model-tag {
+            font-size: 10px;
+            color: #64748b;
+            font-family: monospace;
+        }
+        .debate-arena-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        @media (min-width: 640px) {
+            .debate-arena-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        .debate-bull-box {
+            background: rgba(6, 78, 59, 0.25);
+            border-left: 3px solid #059669;
+            padding: 8px 11px;
+            border-radius: 0 8px 8px 0;
+            font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .debate-bear-box {
+            background: rgba(69, 10, 10, 0.25);
+            border-left: 3px solid #dc2626;
+            padding: 8px 11px;
+            border-radius: 0 8px 8px 0;
+            font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .speaker-bull { color: #34d399; font-weight: bold; }
+        .speaker-bear { color: #f87171; font-weight: bold; }
+        .debate-text { color: #cbd5e1; line-height: 1.4; }
+        .debate-judge-box {
+            background: #111a2e;
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            padding: 9px 12px;
+        }
+        .debate-judge-label {
+            font-size: 11px;
+            color: #38bdf8;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        .debate-action-text {
+            font-size: 12px;
+            color: #e2e8f0;
+            line-height: 1.45;
+            margin-bottom: 8px;
+        }
+        .debate-price-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        .pill-step {
+            background: #1e293b;
+            color: #93c5fd;
+            padding: 2px 7px;
+            border-radius: 4px;
+            border: 1px solid #3b82f6;
+        }
+        .pill-trail {
+            background: #1e293b;
+            color: #fca5a5;
+            padding: 2px 7px;
+            border-radius: 4px;
+            border: 1px solid #ef4444;
+        }
+        .pill-hard {
+            background: #1e293b;
+            color: #f87171;
+            padding: 2px 7px;
+            border-radius: 4px;
+            border: 1px solid #dc2626;
+            font-weight: bold;
+        }
         
         /* 彈窗樣式 (完全防切頭、防遮蔽、大小適配所有螢幕) */
         .modal-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.85); display: none; align-items: flex-end; justify-content: center; }
@@ -109,7 +487,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         }
         @media (min-width: 768px) { .modal-box { border-radius: 16px; padding: 0 24px 24px 24px; } }
         
-        /* 關鍵：標題置頂鎖定，永遠不被滾動吃掉 */
         .modal-header { 
             position: sticky; 
             top: 0; 
@@ -237,103 +614,76 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
         <!-- ================= 台股 ================= -->
         <div id="content-tw">
-            <div class="desktop-grid">
-                <div>
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="card-title">大戶投操作指引</span>
-                            <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
-                        </div>
-                        <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
-                        <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 10px 0 12px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                            <div style="font-size: 13px; font-weight: 600; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
-                                <span>🧮 大戶投零股預算試算</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 12px; color: #94a3b8;">單檔預算: NT$</span>
-                                <input type="number" id="budget-tw-input" value="30000" min="1000" step="1000" oninput="updateBudgetCalc('tw')" style="background: #182238; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: monospace; font-size: 13px; padding: 4px 8px; width: 95px; text-align: right; outline: none;">
-                            </div>
-                        </div>
-                        <div>__TW_RECOMMENDATIONS__</div>
+            <!-- 頂部即時市場狀態列 -->
+            <div class="market-status-bar">
+                <div class="status-indicator">
+                    <span class="status-title">市場狀態：</span>
+                    <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
+                    <span class="status-date">基準：__TW_DATA_DATE__ 收盤</span>
+                </div>
+                <div style="font-size: 12px; color: #94a3b8;">
+                    台股 20 檔科技龍頭 • 永豐大戶投現貨輪動
+                </div>
+            </div>
+
+            <!-- 策略績效四大核心指標 -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-label">📈 策略總報酬率</div>
+                    <div class="kpi-val green">__TW_TOTAL_RET__</div>
+                    <div class="kpi-sub">2024 - 2026 實測</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">⚡ 年化報酬 (CAGR)</div>
+                    <div class="kpi-val green">__TW_CAGR__</div>
+                    <div class="kpi-sub">動能輪動複利</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">🎯 同期基準 (0050)</div>
+                    <div class="kpi-val red">__TW_BENCHMARK__</div>
+                    <div class="kpi-sub">大盤被動持有</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">🛡️ 最大回撤 (MDD)</div>
+                    <div class="kpi-val red">__TW_MDD__</div>
+                    <div class="kpi-sub">嚴格風控底線</div>
+                </div>
+            </div>
+
+            <!-- 雙核心決策戰情室 (今日操作指引 + AI 多空對抗) -->
+            <div class="decision-grid">
+                <!-- 左欄：大戶投操作指引與零股試算 -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title">🎯 大戶投操作指引</span>
+                        <span class="badge __TW_STATE_BADGE__">__TW_STATE_TEXT__</span>
                     </div>
-
-                    <!-- 🤖 TradingAgents AI 多空對抗戰情室 -->
-                    <div class="card" style="border: 1px solid #3b82f6; background: linear-gradient(180deg, #131b2e 0%, #0f172a 100%);">
-                        <div class="card-header">
-                            <span class="card-title" style="color: #60a5fa;">🤖 AI 多空對抗戰情室</span>
-                            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6;">Gemini 2.5 Flash</span>
+                    <div class="data-date">數據基準：__TW_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
+                    <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 10px 0 12px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+                            <span>🧮 大戶投零股預算試算</span>
                         </div>
-                        <div class="data-date">多頭動能狙擊手 vs 空頭風控審計官 ⚔️ 首席量化裁決</div>
-                        __TW_AI_DEBATE__
-                    </div>
-
-                    <div class="card">
-                        <div class="card-title" style="margin-bottom: 10px;">歷史回測績效 (2024 - 2026)</div>
-                        <div class="grid-4">
-                            <div class="grid-item">
-                                <div class="grid-label">總報酬率</div>
-                                <div class="grid-val green">__TW_TOTAL_RET__</div>
-                            </div>
-                            <div class="grid-item">
-                                <div class="grid-label">年化報酬 (CAGR)</div>
-                                <div class="grid-val green">__TW_CAGR__</div>
-                            </div>
-                            <div class="grid-item">
-                                <div class="grid-label">同期基準 (0050)</div>
-                                <div class="grid-val red">__TW_BENCHMARK__</div>
-                            </div>
-                            <div class="grid-item">
-                                <div class="grid-label">最大回撤 (MDD)</div>
-                                <div class="grid-val red">__TW_MDD__</div>
-                            </div>
-                        </div>
-
-                        <!-- 淨值走勢圖 (Equity Curve) -->
-                        <div style="margin-top: 16px; border-top: 1px dashed #1e293b; padding-top: 14px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                                <span style="font-size: 13px; font-weight: 600; color: #cbd5e1;">資產淨值曲線 vs 基準 ($100k 起始)</span>
-                                <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; font-family: monospace;">
-                                    <span style="display: flex; align-items: center; gap: 5px; color: #38bdf8;">
-                                        <span style="display: inline-block; width: 10px; height: 10px; background: #38bdf8; border-radius: 2px;"></span> 策略淨值
-                                    </span>
-                                    <span style="display: flex; align-items: center; gap: 5px; color: #94a3b8;">
-                                        <span style="display: inline-block; width: 12px; height: 2px; background: #94a3b8; border-top: 1px dashed #94a3b8;"></span> 0050基準
-                                    </span>
-                                </div>
-                            </div>
-                            <div id="tw-equity-hud" style="font-family: monospace; font-size: 11px; color: #94a3b8; margin-bottom: 6px; min-height: 18px;"></div>
-                            <div id="tw-equity-chart" style="height: 190px; width: 100%; border-radius: 8px; overflow: hidden; background: #0b0f19; border: 1px solid #182238;"></div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 12px; color: #94a3b8;">單檔預算: NT$</span>
+                            <input type="number" id="budget-tw-input" value="30000" min="1000" step="1000" oninput="updateBudgetCalc('tw')" style="background: #182238; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: monospace; font-size: 13px; padding: 4px 8px; width: 95px; text-align: right; outline: none;">
                         </div>
                     </div>
+                    <div>__TW_RECOMMENDATIONS__</div>
                 </div>
 
-                <div>
-                    <!-- 標的綜合排序 -->
-                    <div class="card">
-                        <div class="card-title" style="margin-bottom: 10px;">科技股評分排序 (點擊列開啟專業圖表)</div>
-                        <div class="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>排名</th>
-                                        <th>標的名稱</th>
-                                        <th class="text-right">最新價</th>
-                                        <th class="text-right">20日動能</th>
-                                        <th class="text-right desktop-only">60日動能</th>
-                                        <th class="text-right desktop-only">KD (9,3)</th>
-                                        <th class="text-right">綜合分</th>
-                                        <th class="text-center">狀態</th>
-                                    </tr>
-                                </thead>
-                                <tbody>__TW_TABLE_ROWS__</tbody>
-                            </table>
-                        </div>
+                <!-- 右欄：TradingAgents AI 多空對抗戰情室 -->
+                <div class="card" style="border: 1px solid #3b82f6; background: linear-gradient(180deg, #131b2e 0%, #0f172a 100%); margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title" style="color: #60a5fa;">🤖 AI 多空對抗戰情室</span>
+                        <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6;">Gemini 2.5 Flash</span>
                     </div>
+                    <div class="data-date">多頭動能狙擊手 vs 空頭風控審計官 ⚔️ 首席量化裁決</div>
+                    __TW_AI_DEBATE__
                 </div>
             </div>
 
             <!-- 個人持股風控監控 (全寬卡片，一覽無遺) -->
-            <div class="card" style="margin-top: 4px;">
+            <div class="card" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <span class="card-title">💼 我的台股庫存與永豐零股風控精算 (8%停損 / -30%硬停損 / 50MA生命線)</span>
                     <div style="display: flex; gap: 8px;">
@@ -347,107 +697,149 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="data-date">即時連動永豐大戶投零股手續費估算、-10% 階梯進場價與 -30% 戰術硬停損</div>
                 __TW_PORTFOLIO__
             </div>
-        </div>
 
-        <!-- ================= 美股 ================= -->
-        <div id="content-us" class="hidden">
-            <div class="desktop-grid">
-                <div>
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="card-title">複委託操作指引</span>
-                            <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
+            <!-- 全市場動能排行與資產淨值曲線 (並列雙欄) -->
+            <div class="deepdive-grid">
+                <!-- 左欄：科技股評分排序總表 -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title">📊 科技股綜合評分排序</span>
+                        <span style="font-size: 11px; color: #64748b;">點擊任意列開啟專業 K 線圖</span>
+                    </div>
+                    
+                    <div class="table-toolbar">
+                        <div class="search-box">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" placeholder="搜尋代號或名稱..." oninput="searchStockTable('tw', this.value)" class="search-input">
                         </div>
-                        <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
-                        <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 10px 0 12px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-                            <div style="font-size: 13px; font-weight: 600; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
-                                <span>🧮 複委託預算試算</span>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 12px; color: #94a3b8;">單檔預算: USD $</span>
-                                <input type="number" id="budget-us-input" value="1000" min="100" step="100" oninput="updateBudgetCalc('us')" style="background: #182238; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: monospace; font-size: 13px; padding: 4px 8px; width: 85px; text-align: right; outline: none;">
-                            </div>
+                        <div class="filter-group">
+                            <button onclick="filterTableTag('tw', 'all', this)" class="filter-btn active">全部 (20)</button>
+                            <button onclick="filterTableTag('tw', 'above50', this)" class="filter-btn">站上 50MA</button>
+                            <button onclick="filterTableTag('tw', 'below50', this)" class="filter-btn">跌破 50MA</button>
                         </div>
-                        <div>__US_RECOMMENDATIONS__</div>
                     </div>
 
-                    <!-- 🤖 TradingAgents AI 多空對抗戰情室 -->
-                    <div class="card" style="border: 1px solid #3b82f6; background: linear-gradient(180deg, #131b2e 0%, #0f172a 100%);">
-                        <div class="card-header">
-                            <span class="card-title" style="color: #60a5fa;">🤖 AI 多空對抗戰情室</span>
-                            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6;">Gemini 2.5 Flash</span>
-                        </div>
-                        <div class="data-date">多頭動能狙擊手 vs 空頭風控審計官 ⚔️ 首席量化裁決</div>
-                        __US_AI_DEBATE__
-                    </div>
-
-                    <div class="card">
-                        <div class="card-title" style="margin-bottom: 10px;">歷史回測績效 (2024 - 2026)</div>
-                        <div class="grid-4">
-                            <div class="grid-item">
-                                <div class="grid-label">總報酬率</div>
-                                <div class="grid-val green">__US_TOTAL_RET__</div>
-                            </div>
-                            <div class="grid-item">
-                                <div class="grid-label">年化報酬 (CAGR)</div>
-                                <div class="grid-val green">__US_CAGR__</div>
-                            </div>
-                            <div class="grid-item">
-                                <div class="grid-label">同期基準 (QQQ)</div>
-                                <div class="grid-val green">__US_BENCHMARK__</div>
-                            </div>
-                            <div class="grid-item">
-                                <div class="grid-label">最大回撤 (MDD)</div>
-                                <div class="grid-val red">__US_MDD__</div>
-                            </div>
-                        </div>
-
-                        <!-- 淨值走勢圖 (Equity Curve) -->
-                        <div style="margin-top: 16px; border-top: 1px dashed #1e293b; padding-top: 14px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                                <span style="font-size: 13px; font-weight: 600; color: #cbd5e1;">資產淨值曲線 vs 基準 ($100k 起始)</span>
-                                <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; font-family: monospace;">
-                                    <span style="display: flex; align-items: center; gap: 5px; color: #38bdf8;">
-                                        <span style="display: inline-block; width: 10px; height: 10px; background: #38bdf8; border-radius: 2px;"></span> 策略淨值
-                                    </span>
-                                    <span style="display: flex; align-items: center; gap: 5px; color: #94a3b8;">
-                                        <span style="display: inline-block; width: 12px; height: 2px; background: #94a3b8; border-top: 1px dashed #94a3b8;"></span> QQQ基準
-                                    </span>
-                                </div>
-                            </div>
-                            <div id="us-equity-hud" style="font-family: monospace; font-size: 11px; color: #94a3b8; margin-bottom: 6px; min-height: 18px;"></div>
-                            <div id="us-equity-chart" style="height: 190px; width: 100%; border-radius: 8px; overflow: hidden; background: #0b0f19; border: 1px solid #182238;"></div>
-                        </div>
+                    <div class="table-wrap table-scrollable">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="text-center" style="width: 50px;">排名</th>
+                                    <th>標的名稱</th>
+                                    <th class="text-right">最新價</th>
+                                    <th class="text-right">20日動能</th>
+                                    <th class="text-right desktop-only">60日動能</th>
+                                    <th class="text-right desktop-only">KD (9,3)</th>
+                                    <th class="text-right">綜合分</th>
+                                    <th class="text-center">狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tw-table-body">__TW_TABLE_ROWS__</tbody>
+                        </table>
                     </div>
                 </div>
 
-                <div>
-                    <!-- 標的綜合排序 -->
-                    <div class="card">
-                        <div class="card-title" style="margin-bottom: 10px;">科技股評分排序 (點擊列開啟專業圖表)</div>
-                        <div class="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>排名</th>
-                                        <th>標的名稱</th>
-                                        <th class="text-right">最新價</th>
-                                        <th class="text-right">20日動能</th>
-                                        <th class="text-right desktop-only">60日動能</th>
-                                        <th class="text-right desktop-only">KD (9,3)</th>
-                                        <th class="text-right">綜合分</th>
-                                        <th class="text-center">狀態</th>
-                                    </tr>
-                                </thead>
-                                <tbody>__US_TABLE_ROWS__</tbody>
-                            </table>
+                <!-- 右欄：歷史資產淨值走勢 vs 基準 -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title">📈 策略淨值走勢 vs 基準 ($100k 起始)</span>
+                        <div class="chart-legend">
+                            <span class="legend-item legend-strat"><span class="strat-dot"></span> 策略淨值</span>
+                            <span class="legend-item legend-bench"><span class="bench-line"></span> 0050基準</span>
+                        </div>
+                    </div>
+                    <div id="tw-equity-hud" class="equity-hud-text"></div>
+                    <div id="tw-equity-chart" class="equity-chart-box"></div>
+
+                    <div class="strategy-notes">
+                        <div class="note-pill">
+                            <span class="note-icon">🛡️</span>
+                            <div><b>雙重風控防護</b>：高點拉回 -8% 移動停損/利，極端情況 -30% 戰術硬停損保護本金。</div>
+                        </div>
+                        <div class="note-pill">
+                            <span class="note-icon">⚡</span>
+                            <div><b>動能輪動加乘</b>：波動率調整夏普動能，只挑選多頭攻堅標的。</div>
+                        </div>
+                        <div class="note-pill">
+                            <span class="note-icon">🧪</span>
+                            <div><b>防過度擬合</b>：Walk-Forward 滾動截面樣本外驗證通過。</div>
                         </div>
                     </div>
                 </div>
             </div>
+        </div>
+
+        <!-- ================= 美股 ================= -->
+        <div id="content-us" class="hidden">
+            <!-- 頂部即時市場狀態列 -->
+            <div class="market-status-bar">
+                <div class="status-indicator">
+                    <span class="status-title">市場狀態：</span>
+                    <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
+                    <span class="status-date">基準：__US_DATA_DATE__ 收盤</span>
+                </div>
+                <div style="font-size: 12px; color: #94a3b8;">
+                    美股 21 檔科技巨頭 • 複委託波段輪動
+                </div>
+            </div>
+
+            <!-- 策略績效四大核心指標 -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-label">📈 策略總報酬率</div>
+                    <div class="kpi-val green">__US_TOTAL_RET__</div>
+                    <div class="kpi-sub">2024 - 2026 實測</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">⚡ 年化報酬 (CAGR)</div>
+                    <div class="kpi-val green">__US_CAGR__</div>
+                    <div class="kpi-sub">動能輪動複利</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">🎯 同期基準 (QQQ)</div>
+                    <div class="kpi-val red">__US_BENCHMARK__</div>
+                    <div class="kpi-sub">那斯達克100</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">🛡️ 最大回撤 (MDD)</div>
+                    <div class="kpi-val red">__US_MDD__</div>
+                    <div class="kpi-sub">嚴格風控底線</div>
+                </div>
+            </div>
+
+            <!-- 雙核心決策戰情室 (今日操作指引 + AI 多空對抗) -->
+            <div class="decision-grid">
+                <!-- 左欄：複委託操作指引與預算試算 -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title">🎯 複委託操作指引</span>
+                        <span class="badge __US_STATE_BADGE__">__US_STATE_TEXT__</span>
+                    </div>
+                    <div class="data-date">數據基準：__US_DATA_DATE__ 收盤 (點擊查看專業K線與KD)</div>
+                    <div style="background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 10px 0 12px 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                        <div style="font-size: 13px; font-weight: 600; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+                            <span>🧮 複委託預算試算</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <span style="font-size: 12px; color: #94a3b8;">單檔預算: USD $</span>
+                            <input type="number" id="budget-us-input" value="1000" min="100" step="100" oninput="updateBudgetCalc('us')" style="background: #182238; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-family: monospace; font-size: 13px; padding: 4px 8px; width: 85px; text-align: right; outline: none;">
+                        </div>
+                    </div>
+                    <div>__US_RECOMMENDATIONS__</div>
+                </div>
+
+                <!-- 右欄：TradingAgents AI 多空對抗戰情室 -->
+                <div class="card" style="border: 1px solid #3b82f6; background: linear-gradient(180deg, #131b2e 0%, #0f172a 100%); margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title" style="color: #60a5fa;">🤖 AI 多空對抗戰情室</span>
+                        <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid #3b82f6;">Gemini 2.5 Flash</span>
+                    </div>
+                    <div class="data-date">多頭動能狙擊手 vs 空頭風控審計官 ⚔️ 首席量化裁決</div>
+                    __US_AI_DEBATE__
+                </div>
+            </div>
 
             <!-- 個人持股風控監控 (全寬卡片，一覽無遺) -->
-            <div class="card" style="margin-top: 4px;">
+            <div class="card" style="margin-bottom: 20px;">
                 <div class="card-header">
                     <span class="card-title">💼 我的美股庫存與風控精算 (8%停利停損 / -30%硬停損 / 50MA生命線)</span>
                     <div style="display: flex; gap: 8px;">
@@ -461,10 +853,79 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="data-date">即時比對買進成本、波段最高價回檔、-30% 戰術硬停損與生命線支撐</div>
                 __US_PORTFOLIO__
             </div>
+
+            <!-- 全市場動能排行與資產淨值曲線 (並列雙欄) -->
+            <div class="deepdive-grid">
+                <!-- 左欄：科技股評分排序總表 -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title">📊 科技股綜合評分排序</span>
+                        <span style="font-size: 11px; color: #64748b;">點擊任意列開啟專業 K 線圖</span>
+                    </div>
+                    
+                    <div class="table-toolbar">
+                        <div class="search-box">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" placeholder="搜尋代號或名稱..." oninput="searchStockTable('us', this.value)" class="search-input">
+                        </div>
+                        <div class="filter-group">
+                            <button onclick="filterTableTag('us', 'all', this)" class="filter-btn active">全部 (21)</button>
+                            <button onclick="filterTableTag('us', 'above50', this)" class="filter-btn">站上 50MA</button>
+                            <button onclick="filterTableTag('us', 'below50', this)" class="filter-btn">跌破 50MA</button>
+                        </div>
+                    </div>
+
+                    <div class="table-wrap table-scrollable">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="text-center" style="width: 50px;">排名</th>
+                                    <th>標的名稱</th>
+                                    <th class="text-right">最新價</th>
+                                    <th class="text-right">20日動能</th>
+                                    <th class="text-right desktop-only">60日動能</th>
+                                    <th class="text-right desktop-only">KD (9,3)</th>
+                                    <th class="text-right">綜合分</th>
+                                    <th class="text-center">狀態</th>
+                                </tr>
+                            </thead>
+                            <tbody id="us-table-body">__US_TABLE_ROWS__</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 右欄：歷史資產淨值走勢 vs 基準 -->
+                <div class="card" style="margin-bottom: 0;">
+                    <div class="card-header">
+                        <span class="card-title">📈 策略淨值走勢 vs 基準 ($100k 起始)</span>
+                        <div class="chart-legend">
+                            <span class="legend-item legend-strat"><span class="strat-dot"></span> 策略淨值</span>
+                            <span class="legend-item legend-bench"><span class="bench-line"></span> QQQ基準</span>
+                        </div>
+                    </div>
+                    <div id="us-equity-hud" class="equity-hud-text"></div>
+                    <div id="us-equity-chart" class="equity-chart-box"></div>
+
+                    <div class="strategy-notes">
+                        <div class="note-pill">
+                            <span class="note-icon">🛡️</span>
+                            <div><b>雙重風控防護</b>：高點拉回 -8% 移動停損/利，極端情況 -30% 戰術硬停損保護本金。</div>
+                        </div>
+                        <div class="note-pill">
+                            <span class="note-icon">⚡</span>
+                            <div><b>動能輪動加乘</b>：波動率調整夏普動能，只挑選多頭攻堅標的。</div>
+                        </div>
+                        <div class="note-pill">
+                            <span class="note-icon">🧪</span>
+                            <div><b>防過度擬合</b>：Walk-Forward 滾動截面樣本外驗證通過。</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div style="text-align: center; font-size: 13px; color: #475569; margin-top: 28px;">
-            數據來源: FinMind / Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場
+            數據來源: FinMind / Yahoo Finance • 風控規則: 跌破 50MA 或高點拉回 8% 出場 • 戰術硬停損 -30%
         </div>
     </div>
 
@@ -482,6 +943,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         最新收盤: <span id="modal-price" style="font-weight: bold; color: #f1f5f9; font-family: monospace; font-size: 14px;">-</span>
                         <span id="modal-trend-badge" class="badge" style="margin-left: 8px;">-</span>
                     </div>
+                    <div id="modal-microstructure-badges" style="margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap;"></div>
                 </div>
                 <button class="close-btn" onclick="closeStockModal()">✕</button>
             </div>
@@ -574,7 +1036,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const chart = LightweightCharts.createChart(container, {
                 width: container.clientWidth || 380,
-                height: 190,
+                height: 230,
                 layout: {
                     background: { color: '#0b0f19' },
                     textColor: '#64748b',
@@ -748,60 +1210,85 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const setVal = (id, val) => {
                 const el = document.getElementById(id);
-                el.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
-                el.style.color = val >= 0 ? '#34d399' : '#f87171';
+                if (el && val !== undefined && val !== null) {
+                    el.innerText = (val >= 0 ? '+' : '') + val.toFixed(2) + '%';
+                    el.style.color = val >= 0 ? '#34d399' : '#f87171';
+                } else if (el) {
+                    el.innerText = '--';
+                }
             };
 
-            setVal('modal-roc20', data.roc_20d);
-            setVal('modal-roc60', data.roc_60d);
-            setVal('modal-bias50', data.bias_50sma);
-            document.getElementById('modal-rsi').innerText = data.rsi.toFixed(1);
-            document.getElementById('modal-k9').innerText = data.latest_k.toFixed(1);
-            document.getElementById('modal-d9').innerText = data.latest_d.toFixed(1);
+            const r20 = (data.roc_20d !== undefined) ? data.roc_20d : data.roc_20;
+            const r60 = (data.roc_60d !== undefined) ? data.roc_60d : data.roc_60;
+            const rsi = (data.rsi !== undefined) ? data.rsi : data.rsi_14;
+            const k = (data.latest_k !== undefined) ? data.latest_k : data.k_9;
+            const d = (data.latest_d !== undefined) ? data.latest_d : data.d_9;
 
-            const extLink = document.getElementById('modal-ext-link');
-            if (data.is_tw) {
-                const twClean = data.symbol.replace('.TW', '').replace('.TWO', '');
-                extLink.href = 'https://tw.stock.yahoo.com/quote/' + twClean;
-            } else {
-                extLink.href = 'https://www.tradingview.com/symbols/' + data.symbol + '/';
+            setVal('modal-roc20', r20);
+            setVal('modal-roc60', r60);
+            setVal('modal-bias50', data.bias_50sma);
+
+            const rsiEl = document.getElementById('modal-rsi');
+            if (rsiEl) rsiEl.innerText = (rsi !== undefined && rsi !== null) ? rsi.toFixed(1) : '--';
+            const kEl = document.getElementById('modal-k9');
+            if (kEl) kEl.innerText = (k !== undefined && k !== null) ? k.toFixed(1) : '--';
+            const dEl = document.getElementById('modal-d9');
+            if (dEl) dEl.innerText = (d !== undefined && d !== null) ? d.toFixed(1) : '--';
+
+            const microEl = document.getElementById('modal-microstructure-badges');
+            if (microEl) {
+                let badges = [];
+                const ker = (data.ker_20 !== undefined) ? data.ker_20 : 0.0;
+                const isVcp = !!data.is_vcp_squeeze;
+                const vcp = (data.vcp_ratio !== undefined) ? data.vcp_ratio : 1.0;
+                const ud = (data.ud_vol_ratio !== undefined) ? data.ud_vol_ratio : 1.0;
+                
+                if (ker >= 0.50) {
+                    badges.push('<span class="badge" style="background:rgba(59,130,246,0.2); color:#60a5fa; border:1px solid rgba(96,165,250,0.5);">⚡平滑鎖碼 (KER ' + ker.toFixed(2) + ')</span>');
+                } else if (ker > 0) {
+                    badges.push('<span class="badge" style="background:rgba(51,65,85,0.4); color:#94a3b8;">KER ' + ker.toFixed(2) + '</span>');
+                }
+                if (isVcp) {
+                    badges.push('<span class="badge" style="background:rgba(234,88,12,0.2); color:#fb923c; border:1px solid rgba(251,146,60,0.5);">🔥VCP蓄勢 (' + (vcp*100).toFixed(0) + '%)</span>');
+                }
+                if (ud >= 1.25) {
+                    badges.push('<span class="badge" style="background:rgba(168,85,247,0.2); color:#c084fc; border:1px solid rgba(192,132,252,0.5);">💎法人吸籌 (UD ' + ud.toFixed(2) + ')</span>');
+                } else if (ud > 0) {
+                    badges.push('<span class="badge" style="background:rgba(51,65,85,0.4); color:#94a3b8;">量價比 ' + ud.toFixed(2) + '</span>');
+                }
+                microEl.innerHTML = badges.join('');
             }
 
-            // 預設 HUD 顯示最新最後一根 K 棒
-            const lastCandle = data.candles[data.candles.length - 1];
-            updateHUDByItem({
-                time: lastCandle.time,
-                open: lastCandle.open,
-                high: lastCandle.high,
-                low: lastCandle.low,
-                close: lastCandle.close,
-                sma20: data.sma20.length ? data.sma20[data.sma20.length - 1].value : null,
-                sma50: data.sma50.length ? data.sma50[data.sma50.length - 1].value : null,
-                k: data.kd_k.length ? data.kd_k[data.kd_k.length - 1].value : null,
-                d: data.kd_d.length ? data.kd_d[data.kd_d.length - 1].value : null
-            }, data.is_tw);
+            const extLink = document.getElementById('modal-ext-link');
+            if (extLink) {
+                if (data.is_tw) {
+                    const rawSym = data.symbol.replace('.TW', '').replace('.TWO', '');
+                    extLink.href = `https://tw.stock.yahoo.com/quote/${rawSym}`;
+                    extLink.innerText = `在 Yahoo 奇摩股市查看 ${data.name} (${rawSym}) ↗`;
+                } else {
+                    extLink.href = `https://finance.yahoo.com/quote/${data.symbol}`;
+                    extLink.innerText = `在 Yahoo Finance 查看 ${data.symbol} ↗`;
+                }
+            }
 
-            const modal = document.getElementById('stock-modal');
-            modal.style.display = 'flex';
+            document.getElementById('stock-modal').style.display = 'flex';
+            document.body.style.overflow = 'hidden';
 
-            // 重置彈窗滾動條置頂，確保標題完美展現
-            const modalBox = modal.querySelector('.modal-box');
-            if (modalBox) modalBox.scrollTop = 0;
-
-            // 確保 DOM 渲染並取得確切寬度後繪製
             requestAnimationFrame(() => {
-                setTimeout(() => {
-                    renderTradingViewCharts(data);
-                }, 30);
+                renderTradingViewCharts(data);
             });
         }
 
         function closeStockModal() {
             document.getElementById('stock-modal').style.display = 'none';
+            document.body.style.overflow = '';
+            if (mainChart) { mainChart.remove(); mainChart = null; }
+            if (kdChart) { kdChart.remove(); kdChart = null; }
+            currentStockData = null;
         }
 
-        function handleOverlayClick(e) {
-            if (e.target.id === 'stock-modal') {
+        function handleOverlayClick(event) {
+            if (event.target.id === 'stock-modal') {
                 closeStockModal();
             }
         }
@@ -809,6 +1296,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
         function renderTradingViewCharts(data) {
             const mainContainer = document.getElementById('mainChartContainer');
             const kdContainer = document.getElementById('kdChartContainer');
+            if (!mainContainer || !kdContainer) return;
 
             mainContainer.innerHTML = '';
             kdContainer.innerHTML = '';
@@ -818,7 +1306,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             const mainHeight = isDesktop ? 340 : 280;
             const kdHeight = isDesktop ? 110 : 95;
 
-            // 核心配置：鎖定邊界、消除任何無效留白
             const commonOptions = {
                 layout: {
                     background: { color: '#0b0f19' },
@@ -862,9 +1349,10 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 wickUpColor: '#34d399',
                 wickDownColor: '#f87171'
             });
-            candleSeries.setData(data.candles);
 
-            // 標註歷史回測買賣點訊號 (綠色買進 ▲ / 紅色出場或停損 ▼)
+            const candleList = data.candles || data.bars || [];
+            candleSeries.setData(candleList);
+
             if (data.markers && data.markers.length > 0) {
                 candleSeries.setMarkers(data.markers);
             }
@@ -874,23 +1362,23 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                 lineWidth: 1.5,
                 crosshairMarkerVisible: false
             });
-            sma20Series.setData(data.sma20);
+            sma20Series.setData(data.sma20 || []);
 
             sma50Series = mainChart.addLineSeries({
                 color: '#fbbf24',
                 lineWidth: 2,
                 crosshairMarkerVisible: false
             });
-            sma50Series.setData(data.sma50);
+            sma50Series.setData(data.sma50 || []);
 
             volumeSeries = mainChart.addHistogramSeries({
                 priceFormat: { type: 'volume' },
                 priceScaleId: '',
                 scaleMargins: { top: 0.82, bottom: 0 }
             });
-            volumeSeries.setData(data.candles.map(c => ({
+            volumeSeries.setData(candleList.map(c => ({
                 time: c.time,
-                value: c.v,
+                value: c.v !== undefined ? c.v : (c.value || 0),
                 color: c.close >= c.open ? 'rgba(52, 211, 153, 0.35)' : 'rgba(248, 113, 113, 0.35)'
             })));
 
@@ -907,14 +1395,14 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const upperRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
             const lowerRef = kdChart.addLineSeries({ color: 'rgba(148, 163, 184, 0.25)', lineWidth: 1, lineStyle: 2, crosshairMarkerVisible: false });
-            upperRef.setData(data.candles.map(c => ({ time: c.time, value: 80 })));
-            lowerRef.setData(data.candles.map(c => ({ time: c.time, value: 20 })));
+            upperRef.setData(candleList.map(c => ({ time: c.time, value: 80 })));
+            lowerRef.setData(candleList.map(c => ({ time: c.time, value: 20 })));
 
             kSeries = kdChart.addLineSeries({ color: '#38bdf8', lineWidth: 1.8, crosshairMarkerVisible: false });
-            kSeries.setData(data.kd_k);
+            kSeries.setData(data.kd_k || []);
 
             dSeries = kdChart.addLineSeries({ color: '#f97316', lineWidth: 1.8, crosshairMarkerVisible: false });
-            dSeries.setData(data.kd_d);
+            dSeries.setData(data.kd_d || []);
 
             // 3. 雙向同步鎖 (水平滾動/縮放 100% 嚴密對齊)
             mainChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
@@ -933,15 +1421,15 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             // 4. 十字準星連動與 HUD (滑鼠移開自動還原最新收盤價)
             const candleMap = {};
-            data.candles.forEach(c => candleMap[c.time] = c);
+            candleList.forEach(c => candleMap[c.time] = c);
             const sma20Map = {};
-            data.sma20.forEach(s => sma20Map[s.time] = s.value);
+            (data.sma20 || []).forEach(s => sma20Map[s.time] = s.value);
             const sma50Map = {};
-            data.sma50.forEach(s => sma50Map[s.time] = s.value);
+            (data.sma50 || []).forEach(s => sma50Map[s.time] = s.value);
             const kMap = {};
-            data.kd_k.forEach(k => kMap[k.time] = k.value);
+            (data.kd_k || []).forEach(k => kMap[k.time] = k.value);
             const dMap = {};
-            data.kd_d.forEach(d => dMap[d.time] = d.value);
+            (data.kd_d || []).forEach(d => dMap[d.time] = d.value);
 
             const handleMove = param => {
                 if (param && param.time) {
@@ -959,18 +1447,18 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                             d: dMap[param.time] || null
                         }, data.is_tw);
                     }
-                } else {
-                    const last = data.candles[data.candles.length - 1];
+                } else if (candleList.length > 0) {
+                    const last = candleList[candleList.length - 1];
                     updateHUDByItem({
                         time: last.time,
                         open: last.open,
                         high: last.high,
                         low: last.low,
                         close: last.close,
-                        sma20: data.sma20.length ? data.sma20[data.sma20.length - 1].value : null,
-                        sma50: data.sma50.length ? data.sma50[data.sma50.length - 1].value : null,
-                        k: data.kd_k.length ? data.kd_k[data.kd_k.length - 1].value : null,
-                        d: data.kd_d.length ? data.kd_d[data.kd_d.length - 1].value : null
+                        sma20: data.sma20 && data.sma20.length ? data.sma20[data.sma20.length - 1].value : null,
+                        sma50: data.sma50 && data.sma50.length ? data.sma50[data.sma50.length - 1].value : null,
+                        k: data.kd_k && data.kd_k.length ? data.kd_k[data.kd_k.length - 1].value : null,
+                        d: data.kd_d && data.kd_d.length ? data.kd_d[data.kd_d.length - 1].value : null
                     }, data.is_tw);
                 }
             };
@@ -979,40 +1467,16 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             kdChart.subscribeCrosshairMove(handleMove);
 
             // 預設視野聚焦最近 90 根 K 棒 (~4.5 個月)，視覺飽滿清晰，亦可隨意往左拖曳回溯全部歷史買賣點
-            const totalBars = data.candles.length;
+            const totalBars = candleList.length;
             const defaultBars = 90;
             const startBar = Math.max(0, totalBars - defaultBars);
-            mainChart.timeScale().setVisibleLogicalRange({ from: startBar, to: totalBars - 1 });
+            if (totalBars > 0) {
+                mainChart.timeScale().setVisibleLogicalRange({ from: startBar, to: totalBars - 1 });
+                handleMove(null);
+            }
         }
 
-        window.addEventListener('resize', () => {
-            if (mainChart && kdChart && currentStockData) {
-                const w = document.getElementById('mainChartContainer').clientWidth;
-                if (w > 0) {
-                    mainChart.applyOptions({ width: w });
-                    kdChart.applyOptions({ width: w });
-                    const totalBars = currentStockData.candles.length;
-                    const startBar = Math.max(0, totalBars - 90);
-                    mainChart.timeScale().setVisibleLogicalRange({ from: startBar, to: totalBars - 1 });
-                }
-            }
-            if (twEquityChart) {
-                const w = document.getElementById('tw-equity-chart').clientWidth;
-                if (w > 0) {
-                    twEquityChart.applyOptions({ width: w });
-                    twEquityChart.timeScale().fitContent();
-                }
-            }
-            if (usEquityChart && usEquityChartInitialized) {
-                const w = document.getElementById('us-equity-chart').clientWidth;
-                if (w > 0) {
-                    usEquityChart.applyOptions({ width: w });
-                    usEquityChart.timeScale().fitContent();
-                }
-            }
-        });
-
-        // ================= 大戶投 / 複委託預算試算 (前端即時連動 localStorage) =================
+        /* 零股/複委託預算試算功能 */
         function updateBudgetCalc(market) {
             const inputId = 'budget-' + market + '-input';
             const inputEl = document.getElementById(inputId);
@@ -1052,7 +1516,36 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             });
         }
 
-        // ================= 持倉 JSON 匯出與匯入功能 =================
+        /* 表格搜尋與快篩功能 */
+        function searchStockTable(market, query) {
+            const q = (query || '').trim().toLowerCase();
+            const rows = document.querySelectorAll('#' + market + '-table-body tr.stock-row');
+            rows.forEach(r => {
+                const ticker = (r.getAttribute('data-ticker') || '').toLowerCase();
+                const name = (r.getAttribute('data-name') || '').toLowerCase();
+                const matches = !q || ticker.includes(q) || name.includes(q);
+                r.style.display = matches ? '' : 'none';
+            });
+        }
+
+        function filterTableTag(market, tag, btn) {
+            const container = document.getElementById('content-' + market);
+            if (container) {
+                container.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            }
+            if (btn) btn.classList.add('active');
+
+            const rows = document.querySelectorAll('#' + market + '-table-body tr.stock-row');
+            rows.forEach(r => {
+                const above = r.getAttribute('data-above') === '1';
+                let show = true;
+                if (tag === 'above50') show = above;
+                if (tag === 'below50') show = !above;
+                r.style.display = show ? '' : 'none';
+            });
+        }
+
+        /* 持倉 JSON 匯出與匯入功能 */
         function exportPortfolioJson() {
             let dataToExport = null;
             try {
@@ -1081,142 +1574,119 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             reader.onload = function(e) {
                 try {
                     const parsed = JSON.parse(e.target.result);
-                    if (Array.isArray(parsed)) {
-                        localStorage.setItem('tqa_custom_portfolio', JSON.stringify(parsed));
-                        alert('✅ 成功匯入 ' + parsed.length + ' 筆持倉資料！重新整理即可套用最新持股。');
-                        window.location.reload();
-                    } else {
-                        alert('⚠️ 匯入失敗：JSON 格式必須為陣列物件！');
+                    if (!Array.isArray(parsed)) {
+                        alert("匯入失敗：JSON 格式必須為陣列清單！");
+                        return;
                     }
-                } catch (err) {
-                    alert('⚠️ 解析 JSON 失敗：' + err.message);
+                    localStorage.setItem('tqa_custom_portfolio', JSON.stringify(parsed));
+                    alert("✅ 成功匯入 " + parsed.length + " 筆持倉！請於本地終端機執行 py generate_web.py 重新產生儀表板。");
+                } catch(err) {
+                    alert("匯入失敗：無效的 JSON 檔案內容 (" + err.message + ")");
                 }
             };
             reader.readAsText(file);
         }
 
-        // 頁面載入時初始化台股淨值圖與預算試算
-        window.addEventListener('DOMContentLoaded', () => {
+        function checkCloudUpdates() {
+            if (window.location.protocol === 'file:') return;
+            fetch(window.location.href, { method: 'HEAD', cache: 'no-cache' })
+                .then(res => {
+                    const lastMod = res.headers.get('Last-Modified');
+                    if (lastMod) {
+                        const savedMod = localStorage.getItem('tqa_last_modified');
+                        if (savedMod && savedMod !== lastMod) {
+                            localStorage.setItem('tqa_last_modified', lastMod);
+                            window.location.reload();
+                        } else {
+                            localStorage.setItem('tqa_last_modified', lastMod);
+                        }
+                    }
+                })
+                .catch(() => {});
+        }
+        setInterval(checkCloudUpdates, 60000);
+
+        window.onload = function() {
             twEquityChart = initEquityChart('tw-equity-chart', 'tw-equity-hud', EQUITY_CURVE_TW, true);
             initBudgetCalc();
-        });
+        };
 
-        // ================= 自動熱更新機制 (背景定時檢查 + 喚醒比對) =================
-        let isCheckingUpdate = false;
-        async function checkCloudUpdates() {
-            if (isCheckingUpdate) return;
-            // 本地 file:// 協定略過 fetch 避免瀏覽器安全性報錯
-            if (!window.location.protocol.startsWith('http')) return;
-            
-            isCheckingUpdate = true;
-            try {
-                const url = window.location.href.split('?')[0] + '?t=' + Date.now();
-                const resp = await fetch(url, {
-                    method: 'GET',
-                    cache: 'no-cache',
-                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-                });
-                if (resp.ok) {
-                    const text = await resp.text();
-                    const match = text.match(/const CURRENT_BUILD_TIME = "([^"]+)";/);
-                    if (match && match[1] && match[1] !== CURRENT_BUILD_TIME) {
-                        console.log('[TQA] 偵測到雲端排程已發布新數據 (' + match[1] + ')，自動無縫刷新中...');
-                        window.location.reload();
-                    }
+        window.addEventListener('resize', () => {
+            if (twEquityChart) {
+                const el = document.getElementById('tw-equity-chart');
+                if (el && el.clientWidth > 0) {
+                    twEquityChart.applyOptions({ width: el.clientWidth });
+                    twEquityChart.timeScale().fitContent();
                 }
-            } catch (e) {
-                // 網路中斷或離線時靜默略過
-            } finally {
-                isCheckingUpdate = false;
             }
-        }
-
-        // 1. 網頁開啟掛著時，每 3 分鐘背景自動檢查一次
-        setInterval(checkCloudUpdates, 3 * 60 * 1000);
-
-        // 2. 當手機解鎖、或電腦從其他分頁切換回來時，立刻喚醒檢查一次
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible') {
-                checkCloudUpdates();
+            if (usEquityChart) {
+                const el = document.getElementById('us-equity-chart');
+                if (el && el.clientWidth > 0) {
+                    usEquityChart.applyOptions({ width: el.clientWidth });
+                    usEquityChart.timeScale().fitContent();
+                }
             }
         });
 
-        // ================= 🐣 吉祥物 (小黃雞桌寵) 視窗邊緣巡邏邏輯 =================
-        const mascotBox = document.getElementById('mascot-box');
-        const mascotImg = document.getElementById('mascot-img');
-        const mascotBubble = document.getElementById('mascot-bubble');
-
-        let posX = 20;
-        let speed = 1.0;
-        let direction = 1; // 1: 向右, -1: 向左
-        let isIdling = false;
+        /* 🐣 吉祥物桌寵漫步與互動機制 */
+        let mascotPos = { x: 20, y: 15 };
+        let direction = 1;
+        let isWalking = true;
+        let walkTimer = null;
         let bubbleTimer = null;
-        let stepCount = 0;
 
-        const MASCOT_QUOTES = [
-            "跌破 50MA 絕不戀戰！",
-            "自高點回檔 8% 移動停利停損！",
-            "抱牢趨勢大波段，不被盤中洗掉 🐣",
-            "今天你的自訂持股都在多頭軌道嗎？",
-            "大戶投現貨 / 零股安心定錨！",
-            "我是 TQA 守護小吉祥物，陪你看盤！",
-            "看多不追高，拉回守均線 🚀",
-            "摸摸我！祝你今天手上的股票漲不停 🎉"
+        const mascotQuotes = [
+            "摸摸我！看多不追高 🐣",
+            "嚴格遵守 -8% 停損，本金最安全！🛡️",
+            "均線之上是朋友，破線莫強求 📈",
+            "動能輪動好輕鬆，今天有喝水嗎？💧",
+            "波段操作不著急，耐心等待階梯價 🎯",
+            "大戶投零股手續費好省，積少成多 🪙",
+            "極端逆風守好 -30% 戰術硬停損！⚡"
         ];
 
         function wanderMascot() {
-            if (!isIdling && mascotBox && mascotImg) {
-                const maxX = window.innerWidth - (window.innerWidth < 640 ? 65 : 80);
-                posX += speed * direction;
-                stepCount++;
+            const mascotBox = document.getElementById('mascot-box');
+            const mascotImg = document.getElementById('mascot-img');
+            if (!mascotBox || !mascotImg) return;
 
-                // 碰到邊緣自動轉向
-                if (posX >= maxX) {
-                    posX = maxX;
+            const maxX = window.innerWidth - 70;
+            const step = 1.2;
+
+            if (isWalking) {
+                mascotPos.x += step * direction;
+                if (mascotPos.x >= maxX) {
+                    mascotPos.x = maxX;
                     direction = -1;
                     mascotImg.style.transform = 'scaleX(-1)';
-                } else if (posX <= 15) {
-                    posX = 15;
+                } else if (mascotPos.x <= 10) {
+                    mascotPos.x = 10;
                     direction = 1;
                     mascotImg.style.transform = 'scaleX(1)';
                 }
-
-                // 隨機停下來休息發呆一下
-                if (Math.random() < 0.003 && stepCount > 120) {
-                    stepCount = 0;
-                    isIdling = true;
-                    mascotImg.style.transition = 'transform 0.4s ease';
-                    mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ' scale(1.06, 0.94)';
-                    setTimeout(() => {
-                        isIdling = false;
-                        mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)');
-                    }, 2200 + Math.random() * 2000);
-                }
-
-                // 走路微搖擺動畫 (Waddle)
-                const waddle = Math.sin(Date.now() / 150) * 4.5;
-                mascotBox.style.transform = `translateX(${posX}px)`;
-                if (!isIdling) {
-                    mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ` rotate(${waddle}deg)`;
-                }
+                mascotBox.style.transform = `translate3d(${mascotPos.x}px, 0, 0)`;
             }
 
             requestAnimationFrame(wanderMascot);
         }
 
-        // 點擊互動跳躍 + 說話
         function petMascot() {
-            if (!mascotImg || !mascotBubble) return;
-            mascotImg.style.transition = 'transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1)';
-            mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ' translateY(-26px) scale(1.22)';
-            
-            const quote = MASCOT_QUOTES[Math.floor(Math.random() * MASCOT_QUOTES.length)];
-            mascotBubble.innerText = quote;
+            const mascotBubble = document.getElementById('mascot-bubble');
+            const mascotImg = document.getElementById('mascot-img');
+            if (!mascotBubble || !mascotImg) return;
+
+            const randQuote = mascotQuotes[Math.floor(Math.random() * mascotQuotes.length)];
+            mascotBubble.innerText = randQuote;
             mascotBubble.classList.add('show');
 
-            setTimeout(() => {
+            isWalking = false;
+            mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)') + ' scale(1.22)';
+
+            clearTimeout(walkTimer);
+            walkTimer = setTimeout(() => {
+                isWalking = true;
                 mascotImg.style.transform = (direction === 1 ? 'scaleX(1)' : 'scaleX(-1)');
-            }, 300);
+            }, 3000);
 
             clearTimeout(bubbleTimer);
             bubbleTimer = setTimeout(() => {
@@ -1224,7 +1694,6 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
             }, 3500);
         }
 
-        // 啟動巡邏
         requestAnimationFrame(wanderMascot);
     </script>
 </body>
@@ -1276,6 +1745,11 @@ class WebDashboardGenerator:
             roc20 = float(row.get("roc_20d", row.get("roc_20", 0.0)))
             score = float(row.get("score", row.get("composite_score", 0.0)))
             above50 = bool(row.get("above_50sma", False))
+            ker20 = float(row.get("ker_20", 0.0))
+            is_vcp = bool(row.get("is_vcp_squeeze", False))
+            vcp_ratio = float(row.get("vcp_ratio", 1.0))
+            ud_vol = float(row.get("ud_vol_ratio", 1.0))
+
             prefix = "NT$" if is_tw else "$"
             market_tag = "tw" if is_tw else "us"
             stop_price = price * 0.92
@@ -1283,6 +1757,16 @@ class WebDashboardGenerator:
             
             roc_color = "#34d399" if roc20 >= 0 else "#f87171"
             roc_sign = "+" if roc20 >= 0 else ""
+
+            # 三大價量微結構因子標籤
+            micro_badges = []
+            if ker20 >= 0.50:
+                micro_badges.append('<span class="badge" style="background:rgba(59,130,246,0.18); color:#60a5fa; border:1px solid rgba(96,165,250,0.5); font-size:10px; padding:1px 5px;">⚡平滑鎖碼</span>')
+            if is_vcp:
+                micro_badges.append('<span class="badge" style="background:rgba(234,88,12,0.18); color:#fb923c; border:1px solid rgba(251,146,60,0.5); font-size:10px; padding:1px 5px;">🔥VCP蓄勢</span>')
+            if ud_vol >= 1.25:
+                micro_badges.append('<span class="badge" style="background:rgba(168,85,247,0.18); color:#c084fc; border:1px solid rgba(192,132,252,0.5); font-size:10px; padding:1px 5px;">💎法人吸籌</span>')
+            micro_html = f'<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">{"".join(micro_badges)}</div>' if micro_badges else ""
             
             # 【關鍵修復】：若標的跌破 50MA，或大盤處於保守防禦且個股破線，加上醒目橘紅標籤
             warning_badge_html = ""
@@ -1299,10 +1783,11 @@ class WebDashboardGenerator:
                     <span class="rank-num">#{idx + 1}</span>
                     <div>
                         <div class="stock-name">{name}</div>
-                        <div class="stock-sub">{ticker} • 綜合分: {score:.1f}</div>
+                        <div class="stock-sub">{ticker} • 綜合分: {score:.1f} • KER: {ker20:.2f} • UD: {ud_vol:.2f}</div>
                         <div style="margin-top: 4px; font-size: 11px; font-family: monospace; color: #94a3b8;">
                             建議買進: <span class="calc-shares" style="color: #38bdf8; font-weight: bold;">--</span> 股 • <span style="color: #cbd5e1;">-8%停損:</span> <span style="color: #f87171; font-weight: 600;">{stop_price_str}</span>
                         </div>
+                        {micro_html}
                     </div>
                 </div>
                 <div style="text-align: right;">
@@ -1435,47 +1920,41 @@ class WebDashboardGenerator:
             ai_tag = "✨ Gemini 2.5 Flash 深度裁決" if is_ai else "⚙️ 量化規則合成"
 
             card_html = f"""
-            <div style="background: #182238; border: 1px solid #28354f; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-                    <div style="display: flex; align-items: baseline; gap: 8px;">
-                        <span style="font-weight: bold; font-size: 15px; color: #f8fafc; cursor: pointer;" onclick="openStockModal('{ticker}')">{name}</span>
-                        <span style="font-family: monospace; font-size: 13px; color: #94a3b8;">{ticker}</span>
-                        <span style="font-family: monospace; font-weight: bold; font-size: 14px; color: #cbd5e1; margin-left: 4px;">{prefix}{price:,.2f}</span>
+            <div class="debate-card">
+                <div class="debate-card-header">
+                    <div class="debate-stock-title">
+                        <span class="debate-stock-name" onclick="openStockModal('{ticker}')">{name}</span>
+                        <span class="debate-stock-ticker">{ticker}</span>
+                        <span class="debate-stock-price">{prefix}{price:,.2f}</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 6px;">
+                    <div class="debate-tags">
                         <span class="badge {v_cls}">{v_txt}</span>
-                        <span style="font-size: 10px; color: #64748b; font-family: monospace;">{ai_tag}</span>
+                        <span class="ai-model-tag">{ai_tag}</span>
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 10px;">
-                    <div style="background: rgba(6, 78, 59, 0.25); border-left: 3px solid #059669; padding: 7px 10px; border-radius: 0 6px 6px 0; font-size: 12px;">
-                        <span style="color: #34d399; font-weight: bold;">🐂 多頭狙擊手:</span>
-                        <span style="color: #cbd5e1; margin-left: 4px;">{bull_sum}</span>
+                <div class="debate-arena-grid">
+                    <div class="debate-bull-box">
+                        <span class="speaker-bull">🐂 多頭動能狙擊手:</span>
+                        <span class="debate-text">{bull_sum}</span>
                     </div>
-                    <div style="background: rgba(69, 10, 10, 0.25); border-left: 3px solid #dc2626; padding: 7px 10px; border-radius: 0 6px 6px 0; font-size: 12px;">
-                        <span style="color: #f87171; font-weight: bold;">🐻 空頭審計官:</span>
-                        <span style="color: #cbd5e1; margin-left: 4px;">{bear_sum}</span>
+                    <div class="debate-bear-box">
+                        <span class="speaker-bear">🐻 空頭風控審計官:</span>
+                        <span class="debate-text">{bear_sum}</span>
                     </div>
                 </div>
 
-                <div style="background: #111a2e; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 10px;">
-                    <div style="font-size: 11px; color: #38bdf8; font-weight: bold; margin-bottom: 3px;">
+                <div class="debate-judge-box">
+                    <div class="debate-judge-label">
                         ⚖️ 首席量化裁決:
                     </div>
-                    <div style="font-size: 12px; color: #e2e8f0; line-height: 1.4; margin-bottom: 6px;">
+                    <div class="debate-action-text">
                         {action}
                     </div>
-                    <div style="display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; font-family: monospace;">
-                        <span style="background: #1e293b; color: #93c5fd; padding: 2px 6px; border-radius: 4px; border: 1px solid #3b82f6;">
-                            🎯 -10%階梯價: {prefix}{step_p:,.1f}
-                        </span>
-                        <span style="background: #1e293b; color: #fca5a5; padding: 2px 6px; border-radius: 4px; border: 1px solid #ef4444;">
-                            🛡️ -8%移動停損: {prefix}{trail_stop_p:,.1f}
-                        </span>
-                        <span style="background: #1e293b; color: #f87171; padding: 2px 6px; border-radius: 4px; border: 1px solid #dc2626; font-weight: bold;">
-                            ⚠️ -30%硬停損: {prefix}{hard_stop_p:,.1f}
-                        </span>
+                    <div class="debate-price-pills">
+                        <span class="pill-step">🎯 -10%階梯價: {prefix}{step_p:,.1f}</span>
+                        <span class="pill-trail">🛡️ -8%移動停損: {prefix}{trail_stop_p:,.1f}</span>
+                        <span class="pill-hard">⚠️ -30%硬停損: {prefix}{hard_stop_p:,.1f}</span>
                     </div>
                 </div>
             </div>
@@ -1484,7 +1963,6 @@ class WebDashboardGenerator:
 
         return "".join(cards)
 
-    @staticmethod
     def build_table_rows_html(df: pd.DataFrame, is_tw: bool) -> str:
         rows = []
         for idx, row in df.iterrows():
@@ -1497,18 +1975,33 @@ class WebDashboardGenerator:
             d9 = row.get("d9", row.get("d_9", 50.0))
             score = row.get("score", row.get("composite_score", 0.0))
             above50 = row["above_50sma"]
+            ker20 = float(row.get("ker_20", 0.0))
+            is_vcp = bool(row.get("is_vcp_squeeze", False))
+            vcp_ratio = float(row.get("vcp_ratio", 1.0))
+            ud_vol = float(row.get("ud_vol_ratio", 1.0))
             prefix = "NT$" if is_tw else "$"
 
             roc20_color = "green" if roc20 >= 0 else "red"
             roc60_color = "green" if roc60 >= 0 else "red"
             badge_html = '<span class="badge badge-bull">站上50MA</span>' if above50 else '<span class="badge badge-bear">跌破50MA</span>'
 
+            # 三大價量微結構因子標籤
+            micro_badges = []
+            if ker20 >= 0.50:
+                micro_badges.append('<span class="badge" style="background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(96,165,250,0.4); font-size:10px; padding:1px 4px; border-radius:3px;">⚡平滑鎖碼</span>')
+            if is_vcp:
+                micro_badges.append('<span class="badge" style="background:rgba(234,88,12,0.15); color:#fb923c; border:1px solid rgba(251,146,60,0.4); font-size:10px; padding:1px 4px; border-radius:3px;">🔥VCP蓄勢</span>')
+            if ud_vol >= 1.25:
+                micro_badges.append('<span class="badge" style="background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(192,132,252,0.4); font-size:10px; padding:1px 4px; border-radius:3px;">💎法人吸籌</span>')
+            micro_badges_html = f'<div style="margin-top:3px; display:flex; gap:3px; flex-wrap:wrap;">{"".join(micro_badges)}</div>' if micro_badges else ""
+
             row_html = f"""
-            <tr onclick="openStockModal('{ticker}')" class="clickable">
+            <tr onclick="openStockModal('{ticker}')" class="clickable stock-row" data-ticker="{ticker}" data-name="{name}" data-above="{1 if above50 else 0}">
                 <td class="font-mono text-center">#{idx + 1}</td>
                 <td>
                     <span style="font-weight: bold; color: #f1f5f9;">{name}</span>
                     <span style="color: #64748b; font-size: 12px; margin-left: 4px; font-family: monospace;">{ticker}</span>
+                    {micro_badges_html}
                 </td>
                 <td class="text-right font-mono" style="font-weight: bold;">{prefix}{price:,.2f}</td>
                 <td class="text-right font-mono {roc20_color}">{(('+' if roc20 >= 0 else '') + f'{roc20:.2f}%')}</td>
@@ -1521,7 +2014,6 @@ class WebDashboardGenerator:
             rows.append(row_html)
         return "".join(rows)
 
-    @staticmethod
     def build_equity_curve_data(perf_df: pd.DataFrame, dataset: Dict[str, pd.DataFrame], bench_ticker: str) -> dict:
         """生成策略資產淨值與對應基準 ETF (0050/QQQ) 之等權起點對比序列"""
         if perf_df.empty:
@@ -1647,12 +2139,22 @@ class WebDashboardGenerator:
                 "price": curr_price,
                 "above_50sma": bool(latest["above_50sma"]),
                 "roc_20d": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
+                "roc_20": round(float(latest["roc_20"]), 2) if not np.isnan(latest["roc_20"]) else 0.0,
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
+                "roc_60": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
                 "bias_50sma": round(bias_50, 2),
                 "rsi": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
+                "rsi_14": round(float(latest["rsi_14"]), 1) if not np.isnan(latest["rsi_14"]) else 50.0,
                 "latest_k": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
+                "k_9": round(float(latest["k_9"]), 1) if not np.isnan(latest["k_9"]) else 50.0,
                 "latest_d": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
+                "d_9": round(float(latest["d_9"]), 1) if not np.isnan(latest["d_9"]) else 50.0,
+                "ker_20": round(float(latest.get("ker_20", 0.0)), 2) if not np.isnan(latest.get("ker_20", 0.0)) else 0.0,
+                "vcp_ratio": round(float(latest.get("vcp_ratio", 1.0)), 2) if not np.isnan(latest.get("vcp_ratio", 1.0)) else 1.0,
+                "is_vcp_squeeze": bool(latest.get("is_vcp_squeeze", False)),
+                "ud_vol_ratio": round(float(latest.get("ud_vol_ratio", 1.0)), 2) if not np.isnan(latest.get("ud_vol_ratio", 1.0)) else 1.0,
                 "candles": candles,
+                "bars": candles,
                 "sma20": sma20_list,
                 "sma50": sma50_list,
                 "kd_k": kd_k_list,

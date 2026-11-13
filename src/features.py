@@ -84,12 +84,12 @@ class TechFeatureEngine:
         data["atr_20"] = tr.rolling(window=20).mean()
         data["atr_pct"] = (data["atr_20"] / close.replace(0, np.nan)) * 100
         
-        # 5. 14 日 RSI
+        # 5. 14 日 RSI (標準 Wilder's Smoothing 指數平滑，與 TradingView 及券商看盤軟體對齊)
         delta = close.diff()
-        gain = delta.clip(lower=0).rolling(window=14).mean()
-        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
+        gain = delta.clip(lower=0).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+        loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
         rs = gain / (loss + 1e-9)
-        data["rsi_14"] = 100 - (100 / (1 + rs))
+        data["rsi_14"] = 100.0 - (100.0 / (1.0 + rs))
         
         # 6. KD (9, 3, 3) 隨機指標計算 (由 Numba 高速向量化核心運算)
         low_9 = low.rolling(window=9).min()
@@ -125,19 +125,51 @@ class TechFeatureEngine:
         ).fillna(False)
 
         # 9B. is_distribution_warn (爆量出貨警訊)：
-        # 近 5 日價格緩跌或滯漲 (5日報酬 <= 1.0%)，但成交量 > 20 日均量 1.5 倍
-        ret_5d = close.pct_change(5) * 100
-        data["is_distribution_warn"] = (
-            (ret_5d <= 1.0) & 
-            (volume > data["vol_sma_20"] * 1.50)
-        ).fillna(False)
+        # 近 5 日價格緩跌或滯漲 (5日報酬 <= 1.0%)，且成交量 > 20 日均量 1.5 倍
+        # 排除「低檔恐慌爆量長下影線換手 (Panic Capitulation)」誤判：
+        # 若收紅 K (close > open) 且下影線 (min(open, close) - low) 大於實體長度 1.5 倍，不列為出貨警告
+        open_p = data["open"]
+        lower_shadow = np.minimum(open_p, close) - low
+        candle_body = (close - open_p).abs()
+        is_panic_capitulation = (close > open_p) & (lower_shadow > candle_body * 1.5)
 
-        # 10. 綜合動能評分 (權重: 20日 40%, 60日 35%, 120日 25%)
-        data["momentum_score"] = (
+        ret_5d = close.pct_change(5) * 100
+        raw_dist_warn = (ret_5d <= 1.0) & (volume > data["vol_sma_20"] * 1.50)
+        data["is_distribution_warn"] = (raw_dist_warn & ~is_panic_capitulation).fillna(False)
+
+        # 9C. 考夫曼效率係數 (KER - Kaufman Efficiency Ratio)
+        # 衡量 20 日價格趨勢平滑度，過濾暴漲暴跌妖股
+        net_change_20 = (close - close.shift(20)).abs()
+        sum_abs_change_20 = close.diff().abs().rolling(window=20).sum()
+        data["ker_20"] = (net_change_20 / (sum_abs_change_20.replace(0, np.nan) + 1e-9)).fillna(0.0)
+
+        # 9D. VCP 波動率壓縮比 (Volatility Contraction Pattern)
+        # 衡量突破前波動收斂蓄勢程度 (5日 ATR / 20日 ATR)
+        atr_5 = tr.rolling(window=5).mean()
+        data["vcp_ratio"] = (atr_5 / (data["atr_20"].replace(0, np.nan) + 1e-9)).fillna(1.0)
+        data["is_vcp_squeeze"] = ((data["vcp_ratio"] < 0.80) & data["above_50sma"]).fillna(False)
+
+        # 9E. 20 日機構隱形吸籌量能比 (Up/Down Volume Ratio)
+        # 過去 20 日上漲日成交量總和 / 下跌日成交量總和，捕捉主力吃貨足跡
+        up_vol = volume.where(delta > 0, 0.0).rolling(window=20).sum()
+        down_vol = volume.where(delta < 0, 0.0).rolling(window=20).sum()
+        data["ud_vol_ratio"] = (up_vol / (down_vol.replace(0, np.nan) + 1.0)).clip(upper=5.0).fillna(1.0)
+
+        # 10. 綜合動能評分 (基底 ROC 75% + 波動率調整夏普動能 15% + 趨勢平滑度與吸籌量能加成 - 出貨懲罰)
+        raw_roc_score = (
             data["roc_20"].fillna(0) * 0.40 +
             data["roc_60"].fillna(0) * 0.35 +
             data["roc_120"].fillna(0) * 0.25
         )
+        vol_mom_scaled = data["vol_adjusted_momentum"].fillna(0) * 25.0
+        base_momentum = raw_roc_score * 0.75 + vol_mom_scaled * 0.15
+
+        # 結合趨勢平滑度 (ker_20: 中心值約 0.35) 與機構量能比 (ud_vol_ratio: 中心值約 1.0)
+        ker_bonus = (data["ker_20"].fillna(0.35) - 0.35) * 8.0
+        ud_bonus = (data["ud_vol_ratio"].fillna(1.0) - 1.0) * 2.0
+        dist_penalty = np.where(data["is_distribution_warn"], 10.0, 0.0)
+
+        data["momentum_score"] = base_momentum + ker_bonus + ud_bonus - dist_penalty
         
         return data
 
@@ -159,9 +191,12 @@ class TechFeatureEngine:
             # 判斷洗盤買點與出貨警訊文字
             shakeout = bool(latest.get("is_shakeout_buy", False))
             dist_warn = bool(latest.get("is_distribution_warn", False))
+            vcp_squeeze = bool(latest.get("is_vcp_squeeze", False))
             signal_tag = "正常"
             if dist_warn:
                 signal_tag = "⚠️ 爆量出貨警戒"
+            elif vcp_squeeze:
+                signal_tag = "🔥 VCP 突破蓄勢"
             elif shakeout:
                 signal_tag = "💎 縮量洗盤買點"
 
@@ -174,6 +209,10 @@ class TechFeatureEngine:
                 "roc_60d": round(float(latest["roc_60"]), 2) if not np.isnan(latest["roc_60"]) else 0.0,
                 "roc_120d": round(float(latest["roc_120"]), 2) if not np.isnan(latest["roc_120"]) else 0.0,
                 "vol_adj_momentum": round(float(latest["vol_adjusted_momentum"]), 2) if not np.isnan(latest["vol_adjusted_momentum"]) else 0.0,
+                "ker_20": round(float(latest["ker_20"]), 2) if not np.isnan(latest["ker_20"]) else 0.0,
+                "vcp_ratio": round(float(latest["vcp_ratio"]), 2) if not np.isnan(latest["vcp_ratio"]) else 1.0,
+                "is_vcp_squeeze": vcp_squeeze,
+                "ud_vol_ratio": round(float(latest["ud_vol_ratio"]), 2) if not np.isnan(latest["ud_vol_ratio"]) else 1.0,
                 "above_50sma": bool(latest["above_50sma"]),
                 "above_200sma": bool(latest["above_200sma"]),
                 "is_new_high": bool(latest["is_new_high_20d"]),
