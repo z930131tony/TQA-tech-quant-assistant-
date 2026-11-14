@@ -2144,7 +2144,8 @@ class WebDashboardGenerator:
             markers = []
             candle_times = set(c["time"] for c in candles)
             if trades_df is not None and not trades_df.empty and "ticker" in trades_df.columns:
-                stock_trades = trades_df[trades_df["ticker"] == ticker]
+                # 分批調倉會讓同一天有多筆同向交易，圖上只標一次
+                stock_trades = trades_df[trades_df["ticker"] == ticker].drop_duplicates(subset=["date", "action"])
                 for _, tr in stock_trades.iterrows():
                     tr_date = tr["date"]
                     d_str = tr_date.strftime("%Y-%m-%d") if hasattr(tr_date, "strftime") else str(tr_date)[:10]

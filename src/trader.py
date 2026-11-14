@@ -78,6 +78,14 @@ class AutoTrader:
         self.hard_stop_pct = hard_stop_pct
         self.tw_tz = pytz.timezone("Asia/Taipei")
 
+    @staticmethod
+    def _breadth_exposure(rank_df: pd.DataFrame, full_at: float = 0.6) -> float:
+        """選股池 (不含 ETF) 站上 50MA 的比例 / 滿倉門檻，上限 1.0"""
+        stocks = rank_df[~rank_df["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])] if not rank_df.empty else rank_df
+        if stocks.empty:
+            return 1.0
+        return float(min(1.0, stocks["above_50sma"].mean() / full_at))
+
     def generate_trade_orders(
         self,
         tw_rank: pd.DataFrame,
@@ -211,8 +219,8 @@ class AutoTrader:
 
             tw_market_bull = (tw_leaders_bull and tw_bench_bull)
 
-            # 奧卡姆剃刀重構：解除底部減倉陷阱，維持 100% 原始預算
-            effective_budget_tw = self.base_budget_tw
+            # 市場廣度：選股池站上 50MA 的比例未達 60% 時，單檔預算按比例縮小 (與回測一致)
+            effective_budget_tw = self.base_budget_tw * self._breadth_exposure(tw_rank)
 
             if tw_market_bull:
                 # 排除基準標的/ETF與當日停損標的
@@ -327,8 +335,7 @@ class AutoTrader:
                 us_bench_bull = (q_c >= q_sma200)
 
             us_market_bull = (us_leaders_bull and us_bench_bull)
-            # 奧卡姆剃刀重構：解除底部減倉陷阱，維持 100% 原始預算
-            effective_budget_us = self.base_budget_us
+            effective_budget_us = self.base_budget_us * self._breadth_exposure(us_rank)
 
             if us_market_bull:
                 us_candidates = us_rank[

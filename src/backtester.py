@@ -34,7 +34,9 @@ class TechBacktester:
         trailing_stop_pct_tw: Optional[float] = None,  # 相容可選參數
         cooldown_days: int = 10,           # 停損出場後 N 個交易日內不再買回同一檔 (防連續洗盤)
         hold_buffer_tw: int = 2,           # 台股持股仍在前 top_n + N 名內就續抱 (省證交稅與手續費)
-        bench_sma_tw: int = 200            # 0050 跌破此均線時台股空手 (空頭市場保護)
+        bench_sma_tw: int = 200,           # 0050 跌破此均線時台股空手 (空頭市場保護)
+        tranches: int = 5,                 # 資金分成 N 份、錯開調倉日，消除「從哪一天開始調倉」的運氣
+        breadth_full: float = 0.6          # 選股池站上 50MA 的比例達此值才滿倉，不足則按比例少買
     ):
         self.dataset = dataset
         self.initial_capital = initial_capital
@@ -51,6 +53,8 @@ class TechBacktester:
         self.cooldown_days = cooldown_days
         self.hold_buffer_tw = hold_buffer_tw
         self.bench_sma_tw = bench_sma_tw
+        self.tranches = tranches
+        self.breadth_full = breadth_full
         self.trailing_stop_pct_tw = trailing_stop_pct_tw if trailing_stop_pct_tw is not None else trailing_stop_pct
 
     def run(self, market: str = "US") -> Dict:
@@ -67,13 +71,6 @@ class TechBacktester:
 
         if not filtered_data:
             raise ValueError(f"市場 {market} 無有效數據！")
-
-        # 交易摩擦成本設定 (單邊手續費與滑價 0.1%，台股賣出另扣證交稅 0.3%)
-        sell_tax = self.tax_rate_tw if market == "TW" else 0.0
-        total_sell_cost = self.fee_rate + sell_tax
-        buy_cost_rate = self.fee_rate
-        # 移動停損參數 (經典 -8% 移動停損)
-        curr_trailing_stop = self.trailing_stop_pct_tw if (market == "TW" and self.trailing_stop_pct_tw is not None) else self.trailing_stop_pct
 
         # 2. 獲取公共交易日曆
         all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_data.values()])))
@@ -92,8 +89,29 @@ class TechBacktester:
         if len(test_dates) < 5:
             raise ValueError(f"指定區間交易日過短 ({len(test_dates)} 天)，無法回測！")
         
-        # 3. 準備回測狀態變數
-        cash = self.initial_capital
+        # 3. 資金分成 K 份、錯開調倉日各跑一次再合併
+        k = max(self.tranches, 1)
+        runs = [
+            self._simulate(market, filtered_data, test_dates, i * self.rebalance_freq // k, self.initial_capital / k)
+            for i in range(k)
+        ]
+        portfolio_values = [
+            {"date": d, "portfolio_value": round(sum(r[0][j]["portfolio_value"] for r in runs), 2)}
+            for j, d in enumerate(test_dates)
+        ]
+        trade_logs = sorted((t for r in runs for t in r[1]), key=lambda t: t["date"])
+        return self._summarize(market, test_dates, portfolio_values, trade_logs)
+
+    def _simulate(self, market: str, filtered_data: Dict, test_dates: List, phase: int, capital: float) -> Tuple[List[Dict], List[Dict]]:
+        """單一份資金的日線模擬 (phase 為調倉日位移)，回傳 (每日淨值, 交易紀錄)"""
+        # 交易摩擦成本設定 (單邊手續費與滑價 0.1%，台股賣出另扣證交稅 0.3%)
+        sell_tax = self.tax_rate_tw if market == "TW" else 0.0
+        total_sell_cost = self.fee_rate + sell_tax
+        buy_cost_rate = self.fee_rate
+        # 移動停損參數 (經典 -8% 移動停損)
+        curr_trailing_stop = self.trailing_stop_pct_tw if (market == "TW" and self.trailing_stop_pct_tw is not None) else self.trailing_stop_pct
+
+        cash = capital
         holdings = {}        # {ticker: shares}
         entry_prices = {}    # {ticker: entry_price}
         peak_prices = {}     # {ticker: peak_price}
@@ -104,7 +122,7 @@ class TechBacktester:
         
         pending_sells = []   # 用于 next_open 模式: [(ticker, reason)]
         pending_buys = []    # 用于 next_open 模式: [(ticker, budget, score)]
-        peak_portfolio_equity = self.initial_capital
+        peak_portfolio_equity = capital
         last_stop = {}       # {ticker: 停損當天的 day_idx}
         hold_buffer = self.hold_buffer_tw if market == "TW" else 0
         tw_bench_ok = None
@@ -243,7 +261,7 @@ class TechBacktester:
                         entry_dates.pop(ticker, None)
 
             # B. 週期性調倉 (Rebalancing)
-            if day_idx % self.rebalance_freq == 0:
+            if day_idx % self.rebalance_freq == phase % self.rebalance_freq:
                 candidates = []
                 exclude_tickers = ["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"]
                 for ticker, df in filtered_data.items():
@@ -306,6 +324,10 @@ class TechBacktester:
 
                     is_market_bull = (us_leaders_bull and qqq_bull)
 
+                # 市場廣度：選股池站上 50MA 的比例不足時，新買部位按比例縮小
+                breadth = float(np.mean([x[2] for x in all_scores])) if all_scores else 1.0
+                exposure = min(1.0, breadth / self.breadth_full) if self.breadth_full > 0 else 1.0
+
                 if not is_market_bull:
                     target_tickers = []
                     top_targets = []
@@ -330,7 +352,7 @@ class TechBacktester:
                                 p_sub = df.loc[df.index <= current_date, "close"]
                                 if not p_sub.empty:
                                     equity += s * float(p_sub.iloc[-1])
-                        target_alloc = equity / self.top_n
+                        target_alloc = equity / self.top_n * exposure
                         for ticker, score, _ in top_targets:
                             if ticker not in [x[0] for x in pending_sells]:
                                 pending_buys.append((ticker, target_alloc, score))
@@ -371,7 +393,7 @@ class TechBacktester:
                                 if not p_sub.empty:
                                     equity += s * float(p_sub.iloc[-1])
                         
-                        target_alloc_per_ticker = equity / self.top_n
+                        target_alloc_per_ticker = equity / self.top_n * exposure
                         for ticker, score, curr_price in top_targets:
                             current_shares = holdings.get(ticker, 0.0)
                             current_val = current_shares * curr_price
@@ -418,7 +440,10 @@ class TechBacktester:
                 "portfolio_value": round(end_of_day_equity, 2)
             })
 
-        # 5. 計算績效統計
+        return portfolio_values, trade_logs
+
+    def _summarize(self, market: str, test_dates: List, portfolio_values: List[Dict], trade_logs: List[Dict]) -> Dict:
+        """由合併後的每日淨值與交易紀錄計算績效統計"""
         perf_df = pd.DataFrame(portfolio_values).set_index("date")
         perf_df["daily_return"] = perf_df["portfolio_value"].pct_change().fillna(0)
         
