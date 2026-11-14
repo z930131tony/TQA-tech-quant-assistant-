@@ -5,7 +5,7 @@
       "shares": 2.0,
       "cost_price": 348.51,
       "entry_date": "2026-11-11",
-      "peak_price": 359.3699951171875
+      "peak_price": 360.8299865722656
     },
     {
       "ticker": "MSFT",
@@ -19,7 +19,7 @@
       "shares": 2.0,
       "cost_price": 393.3,
       "entry_date": "2026-11-11",
-      "peak_price": 401.2200012207031
+      "peak_price": 404.3999938964844
     },
     {
       "ticker": "AMD",
@@ -30,8 +30,8 @@
     }
   ],
   "peak_equity": 114921.2,
-  "current_drawdown_pct": 0.0,
+  "current_drawdown_pct": 1.75,
   "risk_scaling_factor": 1.0,
   "cash": 30000.0,
-  "last_updated": "2026-11-13 14:47:59"
+  "last_updated": "2026-11-14 02:32:16"
 }
