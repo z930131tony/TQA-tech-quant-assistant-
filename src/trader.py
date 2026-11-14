@@ -215,6 +215,7 @@ class AutoTrader:
                 # 排除基準標的/ETF與當日停損標的
                 tw_candidates = tw_rank[
                     (tw_rank["above_50sma"] == True) &
+                    (tw_rank["score"] > 0.0) &
                     (~tw_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
                     (~tw_rank["ticker"].isin(stopped_out_today))
                 ].head(5)
@@ -328,6 +329,7 @@ class AutoTrader:
             if us_market_bull:
                 us_candidates = us_rank[
                     (us_rank["above_50sma"] == True) &
+                    (us_rank["score"] > 0.0) &
                     (~us_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
                     (~us_rank["ticker"].isin(stopped_out_today))
                 ].head(5)

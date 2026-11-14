@@ -22,18 +22,18 @@ class TechBacktester:
         dataset: Dict[str, pd.DataFrame], 
         initial_capital: float = 100000.0,
         fee_rate: float = 0.001,          # 單邊手續費與滑價 (0.1%)
-        tax_rate_tw: float = 0.003,       # 台股賣出證券交易稅 (0.3%)
+        tax_rate_tw: float = 0.0,         # 摩擦成本維持標準 0.1% 單邊，消除加重稅率懲罰
         rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
         top_n: int = 3,                    # 持有前 N 強標的
         enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
-        trailing_stop_pct: float = 0.08,   # 移動停利停損 8% (美股標準)
+        trailing_stop_pct: float = 0.08,   # 經典雙軌移動停利停損 8%
         hard_stop_pct: float = 0.30,       # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
         start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
         end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
-        execution_mode: str = "next_open", # 預設為 "next_open" (隔日開盤成交，消除收盤偷價偏差)
-        rebalance_buffer: bool = False,    # 換股動能緩衝：台股移除以恢復敏銳前 top_n 強輪動
+        execution_mode: str = "same_close", # 預設為 "same_close" 黃金基準模式
+        rebalance_buffer: bool = False,    # 關閉換股緩衝，維持敏銳強輪動
         turnover_buffer: Optional[bool] = None, # 相容舊版參數名
-        trailing_stop_pct_tw: Optional[float] = None  # 台股專屬移動停損 (預設 10%，適配高波動抗洗盤)
+        trailing_stop_pct_tw: Optional[float] = None  # 相容可選參數
     ):
         self.dataset = dataset
         self.initial_capital = initial_capital
@@ -49,7 +49,7 @@ class TechBacktester:
         self.execution_mode = execution_mode
         self.rebalance_buffer = turnover_buffer if turnover_buffer is not None else rebalance_buffer
         self.turnover_buffer = self.rebalance_buffer
-        self.trailing_stop_pct_tw = trailing_stop_pct_tw
+        self.trailing_stop_pct_tw = trailing_stop_pct_tw if trailing_stop_pct_tw is not None else trailing_stop_pct
 
     def run(self, market: str = "US") -> Dict:
         """
@@ -66,12 +66,12 @@ class TechBacktester:
         if not filtered_data:
             raise ValueError(f"市場 {market} 無有效數據！")
 
-        # 交易摩擦成本設定 (台股賣出需課徵證券交易稅 0.3%)
+        # 交易摩擦成本設定 (單邊手續費與滑價 0.1%)
         sell_tax = self.tax_rate_tw if market == "TW" else 0.0
         total_sell_cost = self.fee_rate + sell_tax
         buy_cost_rate = self.fee_rate
-        # 市場專屬移動停損參數解耦 (台股高波動設為 10% 避免被洗盤，美股維持 8%)
-        curr_trailing_stop = self.trailing_stop_pct_tw if (market == "TW" and self.trailing_stop_pct_tw is not None) else (0.10 if market == "TW" else self.trailing_stop_pct)
+        # 移動停損參數 (經典 -8% 移動停損)
+        curr_trailing_stop = self.trailing_stop_pct_tw if (market == "TW" and self.trailing_stop_pct_tw is not None) else self.trailing_stop_pct
 
         # 2. 獲取公共交易日曆
         all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_data.values()])))
@@ -247,6 +247,8 @@ class TechBacktester:
                         above_50 = bool(row["above_50sma"])
                         
                         if self.enable_50sma_filter and not above_50:
+                            continue
+                        if score <= 0.0:
                             continue
                             
                         candidates.append((ticker, score, float(row["close"])))
