@@ -40,6 +40,7 @@ class PortfolioTracker:
             "current_drawdown_pct": 0.0,
             "risk_scaling_factor": 1.0,
             "cash": 30000.0,
+            "stop_log": {},
             "last_updated": ""
         }
 
@@ -120,6 +121,7 @@ class PortfolioTracker:
                     "current_drawdown_pct": float(data.get("current_drawdown_pct", 0.0)),
                     "risk_scaling_factor": float(data.get("risk_scaling_factor", 1.0)),
                     "cash": float(data.get("cash", 30000.0)),
+                    "stop_log": dict(data.get("stop_log", {})),
                     "last_updated": str(data.get("last_updated", ""))
                 }
             else:
@@ -182,6 +184,7 @@ class PortfolioTracker:
             "current_drawdown_pct": float(extra_state.get("current_drawdown_pct", current_state.get("current_drawdown_pct", 0.0))) if extra_state else current_state.get("current_drawdown_pct", 0.0),
             "risk_scaling_factor": float(extra_state.get("risk_scaling_factor", current_state.get("risk_scaling_factor", 1.0))) if extra_state else current_state.get("risk_scaling_factor", 1.0),
             "cash": float(extra_state.get("cash", current_state.get("cash", 30000.0))) if extra_state else current_state.get("cash", 30000.0),
+            "stop_log": (extra_state or {}).get("stop_log", current_state.get("stop_log", {})),
             "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 

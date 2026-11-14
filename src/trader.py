@@ -100,6 +100,9 @@ class AutoTrader:
         orders = []
         logs = []
         stopped_out_today = set()
+        # 停損冷卻：14 個日曆天約等於回測的 10 個交易日
+        stop_log = {t: d for t, d in p_state.get("stop_log", {}).items() if (pd.Timestamp(today_str) - pd.Timestamp(d)).days < 14}
+        cooling = set(stop_log)
         kept_positions = []
 
         # ----------------------------------------------------
@@ -195,7 +198,7 @@ class AutoTrader:
         # ----------------------------------------------------
         # 2A. 台股市場檢驗
         if target_market in ["ALL", "TW"]:
-            # 大盤濾網：0050.TW 站上 50MA 且前 3 強至少 2 檔站上 50MA
+            # 大盤濾網：0050.TW 站上 200MA 且前 3 強至少 2 檔站上 50MA (與回測一致)
             tw_top3_raw = tw_rank.head(3)
             tw_leaders_bull = (tw_top3_raw["above_50sma"].sum() >= 2) if not tw_top3_raw.empty else False
 
@@ -203,8 +206,8 @@ class AutoTrader:
             b_df = self.dataset.get("0050.TW")
             if b_df is not None and not b_df.empty:
                 b_c = float(b_df["close"].iloc[-1])
-                b_sma50 = float(b_df["close"].rolling(50).mean().iloc[-1]) if len(b_df) >= 50 else b_c
-                tw_bench_bull = (b_c >= b_sma50)
+                b_sma200 = float(b_df["close"].rolling(200).mean().iloc[-1]) if len(b_df) >= 200 else b_c
+                tw_bench_bull = (b_c >= b_sma200)
 
             tw_market_bull = (tw_leaders_bull and tw_bench_bull)
 
@@ -217,7 +220,7 @@ class AutoTrader:
                     (tw_rank["above_50sma"] == True) &
                     (tw_rank["score"] > 0.0) &
                     (~tw_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
-                    (~tw_rank["ticker"].isin(stopped_out_today))
+                    (~tw_rank["ticker"].isin(stopped_out_today | cooling))
                 ].head(5)
 
                 current_tw_held = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
@@ -332,7 +335,7 @@ class AutoTrader:
                     (us_rank["above_50sma"] == True) &
                     (us_rank["score"] > 0.0) &
                     (~us_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
-                    (~us_rank["ticker"].isin(stopped_out_today))
+                    (~us_rank["ticker"].isin(stopped_out_today | cooling))
                 ].head(5)
 
                 current_us_held = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
@@ -421,6 +424,8 @@ class AutoTrader:
             else:
                 logs.append("🛡️ 【美股大盤濾網警戒】QQQ 跌破年線或前三強動能分化，啟動保守防禦模式，今日不開立任何美股新多單。")
 
+        stop_log.update({t: today_str for t in stopped_out_today})
+        p_state["stop_log"] = stop_log
         return orders, p_state, logs
 
     def execute_daily_simulation(
@@ -455,7 +460,7 @@ class AutoTrader:
                 }
 
         final_positions = list(pos_map.values())
-        PortfolioTracker.save_portfolio(final_positions)
+        PortfolioTracker.save_portfolio(final_positions, extra_state={"stop_log": p_state.get("stop_log", {})})
         return logs, final_positions
 
     @classmethod

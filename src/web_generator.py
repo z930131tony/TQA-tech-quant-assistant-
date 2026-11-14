@@ -2230,7 +2230,9 @@ class WebDashboardGenerator:
 
         # 1. 操作指示卡與 Top 3 推薦卡片 (優先篩選 50MA 之上且動能 > 0 標的)
         tw_raw_top3 = tw_rank.head(3)
-        tw_market_bull = (tw_raw_top3["above_50sma"].sum() >= 2) if not tw_raw_top3.empty else False
+        tw_bench_row = tw_rank[tw_rank["ticker"] == "0050.TW"] if not tw_rank.empty else tw_rank
+        tw_bench_bull = bool(tw_bench_row["above_200sma"].iloc[0]) if not tw_bench_row.empty else True
+        tw_market_bull = bool(tw_raw_top3["above_50sma"].sum() >= 2 and tw_bench_bull) if not tw_raw_top3.empty else False
         tw_state_badge = "badge-bull" if tw_market_bull else "badge-bear"
         tw_state_text = "多頭攻擊：持股續抱 / 換股" if tw_market_bull else "保守防禦：留意停利 / 停損"
         tw_top3_candidates = cls.select_recommendations(tw_rank)

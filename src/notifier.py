@@ -58,6 +58,9 @@ class LineNotifier:
         data_date = rank_df.iloc[0].get("data_date", "")
         # 前 3 名中至少 2 檔站上 50MA 視為多頭攻擊
         is_bull_attack = bool(rank_df.head(3)["above_50sma"].sum() >= 2) if "above_50sma" in rank_df.columns else False
+        bench_rows = rank_df[rank_df["ticker"] == "0050.TW"]
+        if not bench_rows.empty and "above_200sma" in bench_rows.columns:
+            is_bull_attack = is_bull_attack and bool(bench_rows["above_200sma"].iloc[0])
         
         # 推薦列表優先顯示 above_50sma == True 的前 3 強
         bull_candidates = rank_df[rank_df["above_50sma"] == True] if "above_50sma" in rank_df.columns else pd.DataFrame()
@@ -74,7 +77,7 @@ class LineNotifier:
 
         if not is_bull_attack:
             lines.extend([
-                "市場狀態：防禦觀望（多數標的未站上 50MA）",
+                "市場狀態：防禦觀望（領頭股未站上 50MA 或 0050 跌破 200MA）",
                 "操作建議：維持 100% 現金，暫不建倉。",
                 "--- 觀察名單 ---"
             ])
