@@ -56,7 +56,7 @@ def align_tw_price(price: float, round_down: bool = True) -> float:
     """將價格對齊台股升降單位 (Tick Size)，round_down 用於賣單讓價防踩跌停"""
     tick = get_tw_tick_size(price)
     if round_down:
-        aligned = math.floor(price / tick) * tick
+        aligned = math.floor(round(price / tick, 6)) * tick
     else:
         aligned = round(round(price / tick) * tick, 2)
     return round(aligned, 2)
@@ -144,7 +144,7 @@ class AutoTrader:
                 is_emergency = True
 
             # [第 2 優先] -8% 移動停利停損 (進場隔日後生效)
-            elif pos.get("trailing_stop_triggered", False) or (drawdown_from_peak <= - (self.trailing_stop_pct * 100)):
+            elif pos.get("trailing_stop_triggered", False):
                 sell_reason = f"🛡️ 移動停損平倉 (自高點 ${peak_price:,.2f} 回檔 {abs(drawdown_from_peak):.2f}% >= -8%)"
                 stopped_out_today.add(ticker)
                 is_emergency = True
@@ -289,6 +289,7 @@ class AutoTrader:
                         "market_price": px,
                         "is_emergency": False,
                         "reason": f"🟢 多頭強勢入選 (綜合評分: {cand['score']:.1f}, 倉位係數: {scaling_factor:.2f})",
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "pnl": 0.0,
                         "pnl_pct": 0.0
                     })
@@ -298,7 +299,7 @@ class AutoTrader:
                         "name": cand_name,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": today_str,
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "peak_price": px
                     })
                     logs.append(
@@ -398,6 +399,7 @@ class AutoTrader:
                         "market_price": px,
                         "is_emergency": False,
                         "reason": f"🟢 美股多頭強勢入選 (綜合評分: {cand['score']:.1f}, 倉位係數: {scaling_factor:.2f})",
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "pnl": 0.0,
                         "pnl_pct": 0.0
                     })
@@ -407,7 +409,7 @@ class AutoTrader:
                         "name": c_ticker,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": today_str,
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "peak_price": px
                     })
                     logs.append(
@@ -448,7 +450,7 @@ class AutoTrader:
                     "ticker": t,
                     "shares": ord_item["shares"],
                     "cost_price": ord_item["price"],
-                    "entry_date": today_str,
+                    "entry_date": ord_item.get("entry_date", today_str),
                     "peak_price": ord_item["price"]
                 }
 
@@ -503,7 +505,7 @@ class AutoTrader:
                 code = str(getattr(p, "code", "")).strip()
                 if not code:
                     continue
-                sym = f"{code}.TW" if not code.endswith(".TW") and not code.endswith(".TWO") else code
+                sym = code if "." in code else (f"{code}.TWO" if f"{code}.TWO" in TECH_UNIVERSE_TW else f"{code}.TW")
                 qty = int(getattr(p, "quantity", 0))
                 price = float(getattr(p, "price", 0.0))
                 if qty > 0:
@@ -587,7 +589,14 @@ class AutoTrader:
                 results.append({**ord_item, "status": "SIMULATED", "order_id": "US-SIM"})
                 continue
 
-            clean_code = ticker.replace(".TW", "").replace(".TWO", "")
+            clean_code = ticker.split(".")[0]
+
+            # 盤中零股只收 1~999 股，限價須對齊升降單位
+            if not 1 <= shares <= 999:
+                print(f"  ❌ 【略過】{name} ({ticker}) {act} {shares} 股：盤中零股僅接受 1~999 股，請手動處理。")
+                results.append({**ord_item, "status": "REJECTED", "error": "零股股數須為 1~999"})
+                continue
+            price = align_tw_price(price, round_down=(act == "SELL"))
             prefix = "NT$"
 
             if dry_run:
@@ -612,7 +621,7 @@ class AutoTrader:
                         order_lot=order_lot_val
                     )
                     trade = api.place_order(contract, order)
-                    trade_id = str(getattr(trade, "order", {}).get("id", "SUBMITTED"))
+                    trade_id = str(getattr(getattr(trade, "order", None), "id", "SUBMITTED"))
                     print(f"  🚀 【委託已送出】{name} ({clean_code}) {act} {shares} 股 @ NT${price:,.2f} | 委託號: {trade_id}")
                     results.append({**ord_item, "status": "SUBMITTED", "trade_id": trade_id})
                 except Exception as place_err:

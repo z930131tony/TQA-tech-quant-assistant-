@@ -2282,10 +2282,7 @@ class WebDashboardGenerator:
             us_oos_sharpe_str = f"{us_oos_sharpe_val:.2f}"
             us_oos_alpha_str = f"{us_oos_alpha_val:+.2f}%"
         except Exception:
-            tw_oos_sharpe_str = "1.57"
-            tw_oos_alpha_str = "+20.86%"
-            us_oos_sharpe_str = "1.08"
-            us_oos_alpha_str = "+74.45%"
+            tw_oos_sharpe_str = tw_oos_alpha_str = us_oos_sharpe_str = us_oos_alpha_str = "--"
 
         # 3. 排序表格
         tw_table_rows = cls.build_table_rows_html(tw_rank, is_tw=True)

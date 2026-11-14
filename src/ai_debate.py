@@ -25,8 +25,8 @@ def fetch_yahoo_news(ticker: str, limit: int = 4) -> List[str]:
     """
     透過 Yahoo Finance RSS 免費抓取個股最新即時新聞標題
     """
-    clean_sym = ticker.replace(".TW", "").replace(".TWO", "")
-    feed_sym = f"{clean_sym}.TW" if (".TW" in ticker or ".TWO" in ticker) else ticker
+    clean_sym = ticker.split(".")[0]
+    feed_sym = ticker
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={feed_sym}&region=US&lang=en-US"
     headlines = []
     
@@ -45,7 +45,7 @@ def fetch_yahoo_news(ticker: str, limit: int = 4) -> List[str]:
         pass
 
     if not headlines:
-        headlines = [f"市場焦點持續鎖定 {clean_sym} 在 AI 全產業鏈中的算力需求與技術領先地位。"]
+        headlines = [f"（{clean_sym} 目前抓不到最新新聞標題）"]
     return headlines
 
 def _compile_chip_evidence(tech_info: Dict) -> Dict:

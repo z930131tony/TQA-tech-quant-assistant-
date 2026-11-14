@@ -79,7 +79,7 @@ class LineNotifier:
                 "--- 觀察名單 ---"
             ])
             for rank_idx, (_, row) in enumerate(display_df.iterrows(), start=1):
-                ticker = str(row["ticker"]).replace(".TW", "").replace(".TWO", "")
+                ticker = str(row["ticker"]).split(".")[0]
                 name = row.get("name", ticker)
                 price = row.get("price", 0.0)
                 score = row.get("score", 0.0)
@@ -91,11 +91,11 @@ class LineNotifier:
                 "操作建議（大戶投現貨/零股）："
             ])
             for rank_idx, (_, row) in enumerate(display_df.iterrows(), start=1):
-                ticker = str(row["ticker"]).replace(".TW", "").replace(".TWO", "")
+                ticker = str(row["ticker"]).split(".")[0]
                 name = row.get("name", ticker)
                 price = row.get("price", 0.0)
                 score = row.get("score", 0.0)
-                act = "買進/續抱" if row.get("above_50sma", False) else "觀望"
+                act = "買進/續抱" if (row.get("above_50sma", False) and score > 0) else "觀望"
                 lines.append(f"{rank_idx}. {name}({ticker}) {price:,.1f} | 評分 {score:+.1f} | {act}")
 
         # 若有 AI 多空辯論結果，納入 Top 3 一句話首席裁決
@@ -103,7 +103,7 @@ class LineNotifier:
             lines.append("\n--- 🤖 AI 多空對抗裁決 ---")
             tw_debates = [d for d in ai_debates if d.get("is_tw", True)][:3]
             for d in tw_debates:
-                sym = str(d.get("ticker", "")).replace(".TW", "").replace(".TWO", "")
+                sym = str(d.get("ticker", "")).split(".")[0]
                 nm = d.get("name", sym)
                 verdict = d.get("verdict", "CAUTIOUS_BUY")
                 act = d.get("tactical_action", "")
@@ -172,7 +172,7 @@ class LineNotifier:
                 name = row.get("name", ticker)
                 price = row.get("price", 0.0)
                 score = row.get("score", 0.0)
-                act = "買進/續抱" if row.get("above_50sma", False) else "觀望"
+                act = "買進/續抱" if (row.get("above_50sma", False) and score > 0) else "觀望"
                 lines.append(f"{rank_idx}. {ticker} ${price:,.2f} | 評分 {score:+.1f} | {act}")
 
         # 若有 AI 多空辯論結果，納入 Top 3 一句話首席裁決

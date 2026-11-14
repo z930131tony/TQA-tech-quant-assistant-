@@ -22,7 +22,7 @@ class TechBacktester:
         dataset: Dict[str, pd.DataFrame], 
         initial_capital: float = 100000.0,
         fee_rate: float = 0.001,          # 單邊手續費與滑價 (0.1%)
-        tax_rate_tw: float = 0.0,         # 摩擦成本維持標準 0.1% 單邊，消除加重稅率懲罰
+        tax_rate_tw: float = 0.003,       # 台股賣出證券交易稅 (0.3%)
         rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
         top_n: int = 3,                    # 持有前 N 強標的
         enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
@@ -30,7 +30,7 @@ class TechBacktester:
         hard_stop_pct: float = 0.30,       # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
         start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
         end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
-        execution_mode: str = "same_close", # 預設為 "same_close" 黃金基準模式
+        execution_mode: str = "next_open", # 預設 T 日收盤出訊號、T+1 開盤成交 (專案規範 §5)
         rebalance_buffer: bool = False,    # 關閉換股緩衝，維持敏銳強輪動
         turnover_buffer: Optional[bool] = None, # 相容舊版參數名
         trailing_stop_pct_tw: Optional[float] = None  # 相容可選參數
@@ -66,7 +66,7 @@ class TechBacktester:
         if not filtered_data:
             raise ValueError(f"市場 {market} 無有效數據！")
 
-        # 交易摩擦成本設定 (單邊手續費與滑價 0.1%)
+        # 交易摩擦成本設定 (單邊手續費與滑價 0.1%，台股賣出另扣證交稅 0.3%)
         sell_tax = self.tax_rate_tw if market == "TW" else 0.0
         total_sell_cost = self.fee_rate + sell_tax
         buy_cost_rate = self.fee_rate
