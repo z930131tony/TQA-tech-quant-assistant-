@@ -1,5 +1,11 @@
 # Claude Code — project context
 
+## 專案規範
+
+TQA 的規範放在 `.claude/rules/tqa.md`（防偷看、隔日開盤執行、雙軌風控、嚴禁空殼測試），每次都必須遵守：
+
+@.claude/rules/tqa.md
+
 <!-- cloude-code-toolbox:mcp-skills-awareness-begin -->
 
 ### MCP & Skills awareness (Claude Code ToolBox)
