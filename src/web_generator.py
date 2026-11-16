@@ -1531,11 +1531,16 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 
             const items = document.querySelectorAll('.stock-item[data-market="' + market + '"]');
             items.forEach(item => {
+                const isBuyable = item.getAttribute('data-buyable') === 'true';
                 const price = parseFloat(item.getAttribute('data-price') || '0');
                 const sharesEl = item.querySelector('.calc-shares');
-                if (sharesEl && price > 0) {
-                    const shares = Math.max(1, Math.floor(budget / price));
-                    sharesEl.innerText = shares.toLocaleString();
+                if (sharesEl) {
+                    if (isBuyable && price > 0) {
+                        const shares = Math.max(1, Math.floor(budget / price));
+                        sharesEl.innerText = shares.toLocaleString();
+                    } else {
+                        sharesEl.innerText = '--';
+                    }
                 }
             });
         }
@@ -1745,32 +1750,15 @@ class WebDashboardGenerator:
     def select_top_recommendations(cls, rank_df: pd.DataFrame) -> pd.DataFrame:
         """
         篩選 Top 3 推薦卡片標的：
-        優先篩選 above_50sma == True 的健康多頭標的，並按 composite_score (score) 由高至低排序。
-        若該市場符合條件之標的不滿 3 檔，取全部合格者，並由其餘標的按評分由高至低依序補足至 3 檔。
+        嚴格按 composite_score (score) 由高至低排序取前 3 名，禁止優先按 above_50sma 排序導致負分排在正分前面。
         """
         if rank_df is None or rank_df.empty:
             return pd.DataFrame()
             
         score_col = "score" if "score" in rank_df.columns else "composite_score"
-        
-        # 1. 優先篩選站上 50MA 的多頭標的，並按評分由高至低排序
-        bullish = rank_df[rank_df["above_50sma"] == True].copy() if "above_50sma" in rank_df.columns else pd.DataFrame()
-        if not bullish.empty and score_col in bullish.columns:
-            bullish = bullish.sort_values(by=score_col, ascending=False)
-        
-        if len(bullish) >= 3:
-            return bullish.head(3).reset_index(drop=True)
-            
-        # 2. 若不滿 3 檔，取所有合格標的，並由其餘標的 (按評分降序) 補足至 3 檔
-        selected_tickers = set(bullish["ticker"]) if not bullish.empty else set()
-        remaining = rank_df[~rank_df["ticker"].isin(selected_tickers)]
-        if score_col in remaining.columns:
-            remaining = remaining.sort_values(by=score_col, ascending=False)
-        needed = 3 - len(bullish)
-        fillers = remaining.head(needed)
-        
-        res = pd.concat([bullish, fillers], ignore_index=True)
-        return res
+        if score_col in rank_df.columns:
+            return rank_df.sort_values(by=score_col, ascending=False).head(3).reset_index(drop=True)
+        return rank_df.head(3).reset_index(drop=True)
 
     # 保持舊介面相容性
     select_recommendations = select_top_recommendations
@@ -1811,7 +1799,8 @@ class WebDashboardGenerator:
                 micro_badges.append('<span class="badge" style="background:rgba(168,85,247,0.18); color:#c084fc; border:1px solid rgba(192,132,252,0.5); font-size:10px; padding:1px 5px;">💎法人吸籌</span>')
             micro_html = f'<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">{"".join(micro_badges)}</div>' if micro_badges else ""
             
-            # 【關鍵修復】：若標的跌破 50MA，或大盤處於保守防禦且個股破線，加上醒目橘紅標籤
+            # 【關鍵修復】：若標的跌破 50MA 或動能轉負，加上醒目警示標籤；並判定是否具備可買性
+            is_buyable = above50 and (score > 0.0)
             warning_badge_html = ""
             if not above50:
                 warning_badge_html = """
@@ -1819,9 +1808,16 @@ class WebDashboardGenerator:
                     <span style="background: rgba(234, 88, 12, 0.18); border: 1px solid rgba(249, 115, 22, 0.7); color: #fb923c; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">⚠️ 跌破50MA・觀望勿追</span>
                 </div>
                 """
+            elif score <= 0.0:
+                warning_badge_html = """
+                <div style="margin-top: 4px;">
+                    <span style="background: rgba(239, 68, 68, 0.18); border: 1px solid rgba(239, 68, 68, 0.7); color: #f87171; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; display: inline-block;">⚠️ 動能轉負・觀望勿追</span>
+                </div>
+                """
             
+            buyable_attr = "true" if is_buyable else "false"
             item_html = f"""
-            <div onclick="openStockModal('{ticker}')" class="stock-item" data-price="{price}" data-market="{market_tag}">
+            <div onclick="openStockModal('{ticker}')" class="stock-item" data-price="{price}" data-market="{market_tag}" data-buyable="{buyable_attr}">
                 <div class="stock-left">
                     <span class="rank-num">#{idx + 1}</span>
                     <div>
@@ -2148,7 +2144,8 @@ class WebDashboardGenerator:
             markers = []
             candle_times = set(c["time"] for c in candles)
             if trades_df is not None and not trades_df.empty and "ticker" in trades_df.columns:
-                stock_trades = trades_df[trades_df["ticker"] == ticker]
+                # 分批調倉會讓同一天有多筆同向交易，圖上只標一次
+                stock_trades = trades_df[trades_df["ticker"] == ticker].drop_duplicates(subset=["date", "action"])
                 for _, tr in stock_trades.iterrows():
                     tr_date = tr["date"]
                     d_str = tr_date.strftime("%Y-%m-%d") if hasattr(tr_date, "strftime") else str(tr_date)[:10]
@@ -2234,7 +2231,9 @@ class WebDashboardGenerator:
 
         # 1. 操作指示卡與 Top 3 推薦卡片 (優先篩選 50MA 之上且動能 > 0 標的)
         tw_raw_top3 = tw_rank.head(3)
-        tw_market_bull = (tw_raw_top3["above_50sma"].sum() >= 2) if not tw_raw_top3.empty else False
+        tw_bench_row = tw_rank[tw_rank["ticker"] == "0050.TW"] if not tw_rank.empty else tw_rank
+        tw_bench_bull = bool(tw_bench_row["above_200sma"].iloc[0]) if not tw_bench_row.empty else True
+        tw_market_bull = bool(tw_raw_top3["above_50sma"].sum() >= 2 and tw_bench_bull) if not tw_raw_top3.empty else False
         tw_state_badge = "badge-bull" if tw_market_bull else "badge-bear"
         tw_state_text = "多頭攻擊：持股續抱 / 換股" if tw_market_bull else "保守防禦：留意停利 / 停損"
         tw_top3_candidates = cls.select_recommendations(tw_rank)
@@ -2286,10 +2285,7 @@ class WebDashboardGenerator:
             us_oos_sharpe_str = f"{us_oos_sharpe_val:.2f}"
             us_oos_alpha_str = f"{us_oos_alpha_val:+.2f}%"
         except Exception:
-            tw_oos_sharpe_str = "1.57"
-            tw_oos_alpha_str = "+20.86%"
-            us_oos_sharpe_str = "1.08"
-            us_oos_alpha_str = "+74.45%"
+            tw_oos_sharpe_str = tw_oos_alpha_str = us_oos_sharpe_str = us_oos_alpha_str = "--"
 
         # 3. 排序表格
         tw_table_rows = cls.build_table_rows_html(tw_rank, is_tw=True)

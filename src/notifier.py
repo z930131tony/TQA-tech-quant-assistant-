@@ -58,6 +58,9 @@ class LineNotifier:
         data_date = rank_df.iloc[0].get("data_date", "")
         # 前 3 名中至少 2 檔站上 50MA 視為多頭攻擊
         is_bull_attack = bool(rank_df.head(3)["above_50sma"].sum() >= 2) if "above_50sma" in rank_df.columns else False
+        bench_rows = rank_df[rank_df["ticker"] == "0050.TW"]
+        if not bench_rows.empty and "above_200sma" in bench_rows.columns:
+            is_bull_attack = is_bull_attack and bool(bench_rows["above_200sma"].iloc[0])
         
         # 推薦列表優先顯示 above_50sma == True 的前 3 強
         bull_candidates = rank_df[rank_df["above_50sma"] == True] if "above_50sma" in rank_df.columns else pd.DataFrame()
@@ -74,12 +77,12 @@ class LineNotifier:
 
         if not is_bull_attack:
             lines.extend([
-                "市場狀態：防禦觀望（多數標的未站上 50MA）",
+                "市場狀態：防禦觀望（領頭股未站上 50MA 或 0050 跌破 200MA）",
                 "操作建議：維持 100% 現金，暫不建倉。",
                 "--- 觀察名單 ---"
             ])
             for rank_idx, (_, row) in enumerate(display_df.iterrows(), start=1):
-                ticker = str(row["ticker"]).replace(".TW", "").replace(".TWO", "")
+                ticker = str(row["ticker"]).split(".")[0]
                 name = row.get("name", ticker)
                 price = row.get("price", 0.0)
                 score = row.get("score", 0.0)
@@ -91,11 +94,11 @@ class LineNotifier:
                 "操作建議（大戶投現貨/零股）："
             ])
             for rank_idx, (_, row) in enumerate(display_df.iterrows(), start=1):
-                ticker = str(row["ticker"]).replace(".TW", "").replace(".TWO", "")
+                ticker = str(row["ticker"]).split(".")[0]
                 name = row.get("name", ticker)
                 price = row.get("price", 0.0)
                 score = row.get("score", 0.0)
-                act = "買進/續抱" if row.get("above_50sma", False) else "觀望"
+                act = "買進/續抱" if (row.get("above_50sma", False) and score > 0) else "觀望"
                 lines.append(f"{rank_idx}. {name}({ticker}) {price:,.1f} | 評分 {score:+.1f} | {act}")
 
         # 若有 AI 多空辯論結果，納入 Top 3 一句話首席裁決
@@ -103,7 +106,7 @@ class LineNotifier:
             lines.append("\n--- 🤖 AI 多空對抗裁決 ---")
             tw_debates = [d for d in ai_debates if d.get("is_tw", True)][:3]
             for d in tw_debates:
-                sym = str(d.get("ticker", "")).replace(".TW", "").replace(".TWO", "")
+                sym = str(d.get("ticker", "")).split(".")[0]
                 nm = d.get("name", sym)
                 verdict = d.get("verdict", "CAUTIOUS_BUY")
                 act = d.get("tactical_action", "")
@@ -172,7 +175,7 @@ class LineNotifier:
                 name = row.get("name", ticker)
                 price = row.get("price", 0.0)
                 score = row.get("score", 0.0)
-                act = "買進/續抱" if row.get("above_50sma", False) else "觀望"
+                act = "買進/續抱" if (row.get("above_50sma", False) and score > 0) else "觀望"
                 lines.append(f"{rank_idx}. {ticker} ${price:,.2f} | 評分 {score:+.1f} | {act}")
 
         # 若有 AI 多空辯論結果，納入 Top 3 一句話首席裁決

@@ -153,7 +153,10 @@ class TechDataLoader:
                         l_val = float(item.get("LowestPrice", "0").replace(",", ""))
                         v_val = float(item.get("TradeVolume", "0").replace(",", ""))
                         if c_val > 0:
+                            # Date 為民國年 (例: 1151113)，用它當 K 棒日期，避免假日把舊資料貼成新的一天
+                            roc = str(item.get("Date", "")).strip()
                             mapping[code] = {
+                                "date": pd.Timestamp(int(roc[:-4]) + 1911, int(roc[-4:-2]), int(roc[-2:])),
                                 "open": o_val if o_val > 0 else c_val,
                                 "high": h_val if h_val > 0 else c_val,
                                 "low": l_val if l_val > 0 else c_val,
@@ -232,7 +235,7 @@ class TechDataLoader:
         now_tw = self.get_taipei_now()
         start_date = (now_tw - timedelta(days=lookback)).strftime("%Y-%m-%d")
         end_date = (now_tw + timedelta(days=2)).strftime("%Y-%m-%d")
-        cache_file = os.path.join(self.cache_dir, f"{ticker.replace(':', '_')}.csv")
+        cache_file = os.path.join(self.cache_dir, f"{ticker.replace('.', '_')}.csv")
         allow_save_cache = (days is None or days == config.lookback_days)
 
         # 1. 純快取模式
@@ -386,9 +389,9 @@ class TechDataLoader:
             if df.index[-1].date() < expected_date:
                 clean_id = ticker.split(".")[0].strip()
                 twse_all = self.fetch_twse_openapi_latest()
-                if clean_id in twse_all:
+                if clean_id in twse_all and twse_all[clean_id]["date"] > df.index[-1]:
                     item = twse_all[clean_id]
-                    bar_dt = pd.Timestamp(expected_date)
+                    bar_dt = item["date"]
                     new_row = pd.DataFrame([{
                         "open": item["open"],
                         "high": item["high"],

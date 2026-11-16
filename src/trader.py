@@ -56,7 +56,7 @@ def align_tw_price(price: float, round_down: bool = True) -> float:
     """將價格對齊台股升降單位 (Tick Size)，round_down 用於賣單讓價防踩跌停"""
     tick = get_tw_tick_size(price)
     if round_down:
-        aligned = math.floor(price / tick) * tick
+        aligned = math.floor(round(price / tick, 6)) * tick
     else:
         aligned = round(round(price / tick) * tick, 2)
     return round(aligned, 2)
@@ -77,6 +77,14 @@ class AutoTrader:
         self.trailing_stop_pct = trailing_stop_pct
         self.hard_stop_pct = hard_stop_pct
         self.tw_tz = pytz.timezone("Asia/Taipei")
+
+    @staticmethod
+    def _breadth_exposure(rank_df: pd.DataFrame, full_at: float = 0.6) -> float:
+        """選股池 (不含 ETF) 站上 50MA 的比例 / 滿倉門檻，上限 1.0"""
+        stocks = rank_df[~rank_df["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])] if not rank_df.empty else rank_df
+        if stocks.empty:
+            return 1.0
+        return float(min(1.0, stocks["above_50sma"].mean() / full_at))
 
     def generate_trade_orders(
         self,
@@ -100,6 +108,9 @@ class AutoTrader:
         orders = []
         logs = []
         stopped_out_today = set()
+        # 停損冷卻：14 個日曆天約等於回測的 10 個交易日
+        stop_log = {t: d for t, d in p_state.get("stop_log", {}).items() if (pd.Timestamp(today_str) - pd.Timestamp(d)).days < 14}
+        cooling = set(stop_log)
         kept_positions = []
 
         # ----------------------------------------------------
@@ -144,7 +155,7 @@ class AutoTrader:
                 is_emergency = True
 
             # [第 2 優先] -8% 移動停利停損 (進場隔日後生效)
-            elif pos.get("trailing_stop_triggered", False) or (drawdown_from_peak <= - (self.trailing_stop_pct * 100)):
+            elif pos.get("trailing_stop_triggered", False):
                 sell_reason = f"🛡️ 移動停損平倉 (自高點 ${peak_price:,.2f} 回檔 {abs(drawdown_from_peak):.2f}% >= -8%)"
                 stopped_out_today.add(ticker)
                 is_emergency = True
@@ -195,7 +206,7 @@ class AutoTrader:
         # ----------------------------------------------------
         # 2A. 台股市場檢驗
         if target_market in ["ALL", "TW"]:
-            # 大盤濾網：0050.TW 站上 50MA 且前 3 強至少 2 檔站上 50MA
+            # 大盤濾網：0050.TW 站上 200MA 且前 3 強至少 2 檔站上 50MA (與回測一致)
             tw_top3_raw = tw_rank.head(3)
             tw_leaders_bull = (tw_top3_raw["above_50sma"].sum() >= 2) if not tw_top3_raw.empty else False
 
@@ -203,20 +214,21 @@ class AutoTrader:
             b_df = self.dataset.get("0050.TW")
             if b_df is not None and not b_df.empty:
                 b_c = float(b_df["close"].iloc[-1])
-                b_sma50 = float(b_df["close"].rolling(50).mean().iloc[-1]) if len(b_df) >= 50 else b_c
-                tw_bench_bull = (b_c >= b_sma50)
+                b_sma200 = float(b_df["close"].rolling(200).mean().iloc[-1]) if len(b_df) >= 200 else b_c
+                tw_bench_bull = (b_c >= b_sma200)
 
             tw_market_bull = (tw_leaders_bull and tw_bench_bull)
 
-            # 奧卡姆剃刀重構：解除底部減倉陷阱，維持 100% 原始預算
-            effective_budget_tw = self.base_budget_tw
+            # 市場廣度：選股池站上 50MA 的比例未達 60% 時，單檔預算按比例縮小 (與回測一致)
+            effective_budget_tw = self.base_budget_tw * self._breadth_exposure(tw_rank)
 
             if tw_market_bull:
                 # 排除基準標的/ETF與當日停損標的
                 tw_candidates = tw_rank[
                     (tw_rank["above_50sma"] == True) &
+                    (tw_rank["score"] > 0.0) &
                     (~tw_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
-                    (~tw_rank["ticker"].isin(stopped_out_today))
+                    (~tw_rank["ticker"].isin(stopped_out_today | cooling))
                 ].head(5)
 
                 current_tw_held = [p for p in kept_positions if (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
@@ -288,6 +300,7 @@ class AutoTrader:
                         "market_price": px,
                         "is_emergency": False,
                         "reason": f"🟢 多頭強勢入選 (綜合評分: {cand['score']:.1f}, 倉位係數: {scaling_factor:.2f})",
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "pnl": 0.0,
                         "pnl_pct": 0.0
                     })
@@ -297,7 +310,7 @@ class AutoTrader:
                         "name": cand_name,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": today_str,
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "peak_price": px
                     })
                     logs.append(
@@ -322,14 +335,14 @@ class AutoTrader:
                 us_bench_bull = (q_c >= q_sma200)
 
             us_market_bull = (us_leaders_bull and us_bench_bull)
-            # 奧卡姆剃刀重構：解除底部減倉陷阱，維持 100% 原始預算
-            effective_budget_us = self.base_budget_us
+            effective_budget_us = self.base_budget_us * self._breadth_exposure(us_rank)
 
             if us_market_bull:
                 us_candidates = us_rank[
                     (us_rank["above_50sma"] == True) &
+                    (us_rank["score"] > 0.0) &
                     (~us_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
-                    (~us_rank["ticker"].isin(stopped_out_today))
+                    (~us_rank["ticker"].isin(stopped_out_today | cooling))
                 ].head(5)
 
                 current_us_held = [p for p in kept_positions if not (".TW" in p["ticker"] or ".TWO" in p["ticker"])]
@@ -396,6 +409,7 @@ class AutoTrader:
                         "market_price": px,
                         "is_emergency": False,
                         "reason": f"🟢 美股多頭強勢入選 (綜合評分: {cand['score']:.1f}, 倉位係數: {scaling_factor:.2f})",
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "pnl": 0.0,
                         "pnl_pct": 0.0
                     })
@@ -405,7 +419,7 @@ class AutoTrader:
                         "name": c_ticker,
                         "shares": shares,
                         "cost_price": px,
-                        "entry_date": today_str,
+                        "entry_date": str(cand.get("data_date", today_str)),
                         "peak_price": px
                     })
                     logs.append(
@@ -417,6 +431,8 @@ class AutoTrader:
             else:
                 logs.append("🛡️ 【美股大盤濾網警戒】QQQ 跌破年線或前三強動能分化，啟動保守防禦模式，今日不開立任何美股新多單。")
 
+        stop_log.update({t: today_str for t in stopped_out_today})
+        p_state["stop_log"] = stop_log
         return orders, p_state, logs
 
     def execute_daily_simulation(
@@ -446,12 +462,12 @@ class AutoTrader:
                     "ticker": t,
                     "shares": ord_item["shares"],
                     "cost_price": ord_item["price"],
-                    "entry_date": today_str,
+                    "entry_date": ord_item.get("entry_date", today_str),
                     "peak_price": ord_item["price"]
                 }
 
         final_positions = list(pos_map.values())
-        PortfolioTracker.save_portfolio(final_positions)
+        PortfolioTracker.save_portfolio(final_positions, extra_state={"stop_log": p_state.get("stop_log", {})})
         return logs, final_positions
 
     @classmethod
@@ -501,7 +517,7 @@ class AutoTrader:
                 code = str(getattr(p, "code", "")).strip()
                 if not code:
                     continue
-                sym = f"{code}.TW" if not code.endswith(".TW") and not code.endswith(".TWO") else code
+                sym = code if "." in code else (f"{code}.TWO" if f"{code}.TWO" in TECH_UNIVERSE_TW else f"{code}.TW")
                 qty = int(getattr(p, "quantity", 0))
                 price = float(getattr(p, "price", 0.0))
                 if qty > 0:
@@ -585,7 +601,14 @@ class AutoTrader:
                 results.append({**ord_item, "status": "SIMULATED", "order_id": "US-SIM"})
                 continue
 
-            clean_code = ticker.replace(".TW", "").replace(".TWO", "")
+            clean_code = ticker.split(".")[0]
+
+            # 盤中零股只收 1~999 股，限價須對齊升降單位
+            if not 1 <= shares <= 999:
+                print(f"  ❌ 【略過】{name} ({ticker}) {act} {shares} 股：盤中零股僅接受 1~999 股，請手動處理。")
+                results.append({**ord_item, "status": "REJECTED", "error": "零股股數須為 1~999"})
+                continue
+            price = align_tw_price(price, round_down=(act == "SELL"))
             prefix = "NT$"
 
             if dry_run:
@@ -610,7 +633,7 @@ class AutoTrader:
                         order_lot=order_lot_val
                     )
                     trade = api.place_order(contract, order)
-                    trade_id = str(getattr(trade, "order", {}).get("id", "SUBMITTED"))
+                    trade_id = str(getattr(getattr(trade, "order", None), "id", "SUBMITTED"))
                     print(f"  🚀 【委託已送出】{name} ({clean_code}) {act} {shares} 股 @ NT${price:,.2f} | 委託號: {trade_id}")
                     results.append({**ord_item, "status": "SUBMITTED", "trade_id": trade_id})
                 except Exception as place_err:

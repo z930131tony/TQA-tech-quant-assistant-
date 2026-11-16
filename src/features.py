@@ -86,10 +86,10 @@ class TechFeatureEngine:
         data["atr_20"] = tr.rolling(window=20).mean()
         data["atr_pct"] = (data["atr_20"] / close.replace(0, np.nan)) * 100
         
-        # 5. 14 日 RSI (標準 Wilder's Smoothing 指數平滑，與 TradingView 及券商看盤軟體對齊)
+        # 5. 14 日 RSI
         delta = close.diff()
-        gain = delta.clip(lower=0).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
-        loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / 14.0, min_periods=14, adjust=False).mean()
+        gain = delta.clip(lower=0).rolling(window=14).mean()
+        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         rs = gain / (loss + 1e-9)
         data["rsi_14"] = 100.0 - (100.0 / (1.0 + rs))
         
