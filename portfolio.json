@@ -8,13 +8,6 @@
       "peak_price": 360.8299865722656
     },
     {
-      "ticker": "MSFT",
-      "shares": 1.0,
-      "cost_price": 533.16,
-      "entry_date": "2026-11-11",
-      "peak_price": 533.16
-    },
-    {
       "ticker": "TSLA",
       "shares": 2.0,
       "cost_price": 393.3,
@@ -23,11 +16,11 @@
     }
   ],
   "peak_equity": 114921.2,
-  "current_drawdown_pct": 17.81,
+  "current_drawdown_pct": 32.46,
   "risk_scaling_factor": 1.0,
   "cash": 30000.0,
   "stop_log": {
     "AMD": "2026-11-17"
   },
-  "last_updated": "2026-11-17 06:15:06"
+  "last_updated": "2026-11-17 16:21:20"
 }
