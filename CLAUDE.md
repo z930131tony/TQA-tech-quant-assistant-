@@ -6,11 +6,16 @@ TQA 的規範放在 `.claude/rules/tqa.md`（防偷看、隔日開盤執行、�
 
 @.claude/rules/tqa.md
 
+## Ponytail 一律啟用
+
+每次對話一開始就載入 ponytail skill（full 等級），不用先問。整個對話都維持啟用，除非使用者說「stop ponytail」或 `/ponytail off`。
+
+
 <!-- cloude-code-toolbox:mcp-skills-awareness-begin -->
 
 ### MCP & Skills awareness (Claude Code ToolBox)
 
-_Last synced: 2026-11-14T05:00:45.773Z._
+_Last synced: 2026-11-16T20:31:42.835Z._
 
 - **Full report:** `.claude/cloude-code-toolbox-mcp-skills-awareness.md` in this workspace (auto-overwritten on each scan). Use it as ground truth for configured servers and skill folders.
 - **MCP:** For **live tools** in Claude Code, enable the matching server via `/mcp`. Servers are configured in `~/.claude.json` (user) and `.mcp.json` (project).
@@ -36,5 +41,17 @@ _None found (or no workspace open)._
 #### User skills
 
 - **hallmark** — `C:\Users\Tony\.claude\skills\hallmark` — Design skill for websites and new pages that look designed, not generated. Use when the user asks to build or design something new, or names Hallmark. Never use it on an existing design unless the user names Hallmark, as
+
+- **ponytail** — `C:\Users\Tony\.claude\skills\ponytail` — >
+
+- **ponytail-audit** — `C:\Users\Tony\.claude\skills\ponytail-audit` — >
+
+- **ponytail-debt** — `C:\Users\Tony\.claude\skills\ponytail-debt` — >
+
+- **ponytail-gain** — `C:\Users\Tony\.claude\skills\ponytail-gain` — >
+
+- **ponytail-help** — `C:\Users\Tony\.claude\skills\ponytail-help` — >
+
+- **ponytail-review** — `C:\Users\Tony\.claude\skills\ponytail-review` — >
 
 <!-- cloude-code-toolbox:mcp-skills-awareness-end -->
