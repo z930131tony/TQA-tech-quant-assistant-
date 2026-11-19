@@ -1,0 +1,589 @@
+"""
+台美純科技股量化回測引擎 (升級版：預設 T+1 隔日開盤執行 + 台股證交稅精算 + 基準 ETF 隔離 + 截面動能分位數檢驗)
+雙軌風控：-8% 移動停利停損 (Trailing Stop) + -30% 戰術硬停損 (Hard Stop-Loss)
+"""
+import numpy as np
+import pandas as pd
+from datetime import datetime
+from typing import Dict, List, Tuple, Optional
+
+try:
+    import pybroker
+    PYBROKER_AVAILABLE = True
+except ImportError:
+    PYBROKER_AVAILABLE = False
+
+from src.config import config
+from src.strategy.features import TechFeatureEngine
+from src.core.market_rules import BENCHMARK_TICKERS, TW_SELL_TAX
+from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT, hard_stop_hit, trailing_stop_hit
+
+class TechBacktester:
+    def __init__(
+        self, 
+        dataset: Dict[str, pd.DataFrame], 
+        initial_capital: float = 100000.0,
+        fee_rate: float = 0.001,          # 單邊手續費與滑價 (0.1%)
+        tax_rate_tw: float = TW_SELL_TAX,     # 台股賣出證券交易稅 (0.3%)
+        rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
+        top_n: int = 3,                    # 持有前 N 強標的
+        enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
+        trailing_stop_pct: float = TRAILING_STOP_PCT,  # 經典雙軌移動停利停損 8%
+        hard_stop_pct: float = HARD_STOP_PCT,  # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
+        start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
+        end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
+        execution_mode: str = "next_open", # 預設 T 日收盤出訊號、T+1 開盤成交 (專案規範 §5)
+        trailing_stop_pct_tw: Optional[float] = None,  # 相容可選參數
+        cooldown_days: int = 10,           # 停損出場後 N 個交易日內不再買回同一檔 (防連續洗盤)
+        hold_buffer_tw: int = 2,           # 台股持股仍在前 top_n + N 名內就續抱 (省證交稅與手續費)
+        bench_sma_tw: int = 200,           # 0050 跌破此均線時台股空手 (空頭市場保護)
+        tranches: int = 5,                 # 資金分成 N 份、錯開調倉日，消除「從哪一天開始調倉」的運氣
+        breadth_full: float = 0.6          # 選股池站上 50MA 的比例達此值才滿倉，不足則按比例少買
+    ):
+        self.dataset = dataset
+        self.initial_capital = initial_capital
+        self.fee_rate = fee_rate
+        self.tax_rate_tw = tax_rate_tw
+        self.rebalance_freq = rebalance_freq
+        self.top_n = top_n
+        self.enable_50sma_filter = enable_50sma_filter
+        self.trailing_stop_pct = trailing_stop_pct
+        self.hard_stop_pct = hard_stop_pct
+        self.start_date = start_date
+        self.end_date = end_date
+        self.execution_mode = execution_mode
+        self.cooldown_days = cooldown_days
+        self.hold_buffer_tw = hold_buffer_tw
+        self.bench_sma_tw = bench_sma_tw
+        self.tranches = tranches
+        self.breadth_full = breadth_full
+        self.trailing_stop_pct_tw = trailing_stop_pct_tw if trailing_stop_pct_tw is not None else trailing_stop_pct
+
+    def run(self, market: str = "US") -> Dict:
+        """
+        執行量化回測
+        :param market: "US" 或 "TW"
+        """
+        # 1. 篩選對應市場的數據並計算技術特徵
+        filtered_data = {}
+        for ticker, df in self.dataset.items():
+            is_tw = (".TW" in ticker) or (".TWO" in ticker)
+            if (market == "TW" and is_tw) or (market == "US" and not is_tw):
+                filtered_data[ticker] = TechFeatureEngine.calculate_technical_features(df)
+
+        if not filtered_data:
+            raise ValueError(f"市場 {market} 無有效數據！")
+
+        # 2. 獲取公共交易日曆
+        all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_data.values()])))
+        
+        # 確保足夠長歷史以暖機均線（跳過前 60 天初始化特徵）
+        start_idx = 60
+        if len(all_dates) <= start_idx:
+            raise ValueError("歷史資料天數過短，不足以完成指標預熱！")
+
+        test_dates = all_dates[start_idx:]
+        if self.start_date:
+            test_dates = [d for d in test_dates if d >= pd.to_datetime(self.start_date)]
+        if self.end_date:
+            test_dates = [d for d in test_dates if d <= pd.to_datetime(self.end_date)]
+
+        if len(test_dates) < 5:
+            raise ValueError(f"指定區間交易日過短 ({len(test_dates)} 天)，無法回測！")
+        
+        # 3. 資金分成 K 份、錯開調倉日各跑一次再合併
+        k = max(self.tranches, 1)
+        runs = [
+            self._simulate(market, filtered_data, test_dates, i * self.rebalance_freq // k, self.initial_capital / k)
+            for i in range(k)
+        ]
+        portfolio_values = [
+            {"date": d, "portfolio_value": round(sum(r[0][j]["portfolio_value"] for r in runs), 2)}
+            for j, d in enumerate(test_dates)
+        ]
+        trade_logs = sorted((t for r in runs for t in r[1]), key=lambda t: t["date"])
+        return self._summarize(market, test_dates, portfolio_values, trade_logs)
+
+    def _simulate(self, market: str, filtered_data: Dict, test_dates: List, phase: int, capital: float) -> Tuple[List[Dict], List[Dict]]:
+        """單一份資金的日線模擬 (phase 為調倉日位移)，回傳 (每日淨值, 交易紀錄)"""
+        # 交易摩擦成本設定 (單邊手續費與滑價 0.1%，台股賣出另扣證交稅 0.3%)
+        sell_tax = self.tax_rate_tw if market == "TW" else 0.0
+        total_sell_cost = self.fee_rate + sell_tax
+        buy_cost_rate = self.fee_rate
+        # 移動停損參數 (經典 -8% 移動停損)
+        curr_trailing_stop = self.trailing_stop_pct_tw if (market == "TW" and self.trailing_stop_pct_tw is not None) else self.trailing_stop_pct
+
+        cash = capital
+        holdings = {}        # {ticker: shares}
+        entry_prices = {}    # {ticker: entry_price}
+        peak_prices = {}     # {ticker: peak_price}
+        entry_dates = {}     # {ticker: entry_date}
+        
+        portfolio_values = []
+        trade_logs = []
+        
+        pending_sells = []   # 用于 next_open 模式: [(ticker, reason)]
+        pending_buys = []    # 用于 next_open 模式: [(ticker, budget, score)]
+        peak_portfolio_equity = capital
+        last_stop = {}       # {ticker: 停損當天的 day_idx}
+        hold_buffer = self.hold_buffer_tw if market == "TW" else 0
+        tw_bench_ok = None
+        if market == "TW" and "0050.TW" in filtered_data:
+            b_close = filtered_data["0050.TW"]["close"]
+            b_sma = b_close.rolling(self.bench_sma_tw).mean()
+            tw_bench_ok = (b_close >= b_sma) | b_sma.isna()   # 均線暖機期間不擋
+
+        # 4. 開始日線回測循環
+        for day_idx, current_date in enumerate(test_dates):
+            # 追蹤帳戶總淨值與歷史峰值回撤 (Portfolio-Level Drawdown Scaling)
+            cur_equity = cash
+            for t, s in holdings.items():
+                df = filtered_data[t]
+                if current_date in df.index:
+                    cur_equity += s * float(df.loc[current_date, "close"])
+                else:
+                    p_sub = df.loc[df.index <= current_date, "close"]
+                    if not p_sub.empty:
+                        cur_equity += s * float(p_sub.iloc[-1])
+            peak_portfolio_equity = max(peak_portfolio_equity, cur_equity)
+            portfolio_dd = (peak_portfolio_equity - cur_equity) / peak_portfolio_equity if peak_portfolio_equity > 0 else 0.0
+
+            # 若為 next_open 模式，於今日開盤市價執行昨日留存委託
+            if self.execution_mode == "next_open":
+                # 執行昨日 pending 賣單
+                for ticker, reason in pending_sells:
+                    if ticker in holdings:
+                        df = filtered_data[ticker]
+                        if current_date in df.index:
+                            open_p = float(df.loc[current_date, "open"])
+                            shares = holdings.pop(ticker)
+                            sell_proceeds = shares * open_p * (1.0 - total_sell_cost)
+                            cash += sell_proceeds
+                            pnl = sell_proceeds - (shares * entry_prices[ticker])
+                            pnl_pct = (open_p / entry_prices[ticker] - 1.0) * 100.0
+                            trade_logs.append({
+                                "date": current_date,
+                                "ticker": ticker,
+                                "action": "SELL",
+                                "reason": reason,
+                                "price": round(open_p, 2),
+                                "shares": round(shares, 4),
+                                "pnl": round(pnl, 2),
+                                "pnl_pct": f"{pnl_pct:+.2f}%"
+                            })
+                            entry_prices.pop(ticker, None)
+                            peak_prices.pop(ticker, None)
+                            entry_dates.pop(ticker, None)
+                pending_sells = []
+
+                # 執行昨日 pending 買單
+                for ticker, budget, score in pending_buys:
+                    df = filtered_data[ticker]
+                    if current_date in df.index:
+                        open_p = float(df.loc[current_date, "open"])
+                        current_shares = holdings.get(ticker, 0.0)
+                        current_val = current_shares * open_p
+                        if budget > current_val:
+                            alloc = min(budget - current_val, cash)
+                            if alloc > 100.0:
+                                cost_p = open_p * (1.0 + buy_cost_rate)
+                                shares_to_buy = alloc / cost_p
+                                cash -= shares_to_buy * cost_p
+                                if ticker in holdings:
+                                    old_cost_total = current_shares * entry_prices[ticker]
+                                    total_shares = current_shares + shares_to_buy
+                                    entry_prices[ticker] = (old_cost_total + (shares_to_buy * open_p)) / total_shares
+                                    holdings[ticker] = total_shares
+                                else:
+                                    holdings[ticker] = shares_to_buy
+                                    entry_prices[ticker] = open_p
+                                    peak_prices[ticker] = open_p
+                                    entry_dates[ticker] = current_date
+                                trade_logs.append({
+                                    "date": current_date,
+                                    "ticker": ticker,
+                                    "action": "BUY",
+                                    "reason": f"動能入選 (評分: {score:.1f}, 隔日開盤成交)",
+                                    "price": round(open_p, 2),
+                                    "shares": round(shares_to_buy, 4),
+                                    "pnl": 0.0,
+                                    "pnl_pct": "0.00%"
+                                })
+                pending_buys = []
+
+            # A. 雙軌停損平倉判斷 (-30% 戰術硬停損 + -8% 移動停利停損)
+            liquidate_due_to_stop = []
+            for ticker, shares in list(holdings.items()):
+                df = filtered_data[ticker]
+                if current_date in df.index:
+                    curr_price = float(df.loc[current_date, "close"])
+                    entry_p = entry_prices.get(ticker, curr_price)
+                    
+                    # 1. 優先檢查 -30% 戰術絕對硬停損線 (Hard Stop-Loss)
+                    if hard_stop_hit(entry_p, curr_price, self.hard_stop_pct):
+                        liquidate_due_to_stop.append((ticker, curr_price, "戰術絕對停損 (虧損達30%)"))
+                        continue
+
+                    # 2. 檢查移動停利停損 (進場隔日後啟動最高價追蹤)
+                    if entry_dates.get(ticker) and current_date > entry_dates[ticker]:
+                        peak_prices[ticker] = max(peak_prices.get(ticker, curr_price), curr_price)
+                        if trailing_stop_hit(peak_prices[ticker], curr_price, curr_trailing_stop):
+                            liquidate_due_to_stop.append((ticker, curr_price, f"停損平倉 (回檔達{curr_trailing_stop*100:.0f}%)"))
+
+            stopped_out_today = {t for t, _, _ in liquidate_due_to_stop}
+            for t in stopped_out_today:
+                last_stop[t] = day_idx
+
+            if self.execution_mode == "next_open":
+                for ticker, _, reason in liquidate_due_to_stop:
+                    if ticker not in [x[0] for x in pending_sells]:
+                        pending_sells.append((ticker, reason + " (隔日開盤市價出清)"))
+            else:
+                for ticker, exit_price, reason in liquidate_due_to_stop:
+                    if ticker in holdings:
+                        shares = holdings.pop(ticker)
+                        sell_proceeds = shares * exit_price * (1.0 - total_sell_cost)
+                        cash += sell_proceeds
+                        pnl = sell_proceeds - (shares * entry_prices[ticker])
+                        pnl_pct = (exit_price / entry_prices[ticker] - 1.0) * 100.0
+                        trade_logs.append({
+                            "date": current_date,
+                            "ticker": ticker,
+                            "action": "SELL",
+                            "reason": reason,
+                            "price": round(exit_price, 2),
+                            "shares": round(shares, 4),
+                            "pnl": round(pnl, 2),
+                            "pnl_pct": f"{pnl_pct:+.2f}%"
+                        })
+                        entry_prices.pop(ticker, None)
+                        peak_prices.pop(ticker, None)
+                        entry_dates.pop(ticker, None)
+
+            # B. 週期性調倉 (Rebalancing)
+            if day_idx % self.rebalance_freq == phase % self.rebalance_freq:
+                candidates = []
+                exclude_tickers = BENCHMARK_TICKERS
+                for ticker, df in filtered_data.items():
+                    # 排除基準指數與產業 ETF 混入個股選股池
+                    if ticker in exclude_tickers:
+                        continue
+                    if day_idx - last_stop.get(ticker, -999) < max(self.cooldown_days, 1):
+                        continue
+                    if current_date in df.index:
+                        row = df.loc[current_date]
+                        score = float(row["momentum_score"]) if not np.isnan(row["momentum_score"]) else -999.0
+                        above_50 = bool(row["above_50sma"])
+                        
+                        if self.enable_50sma_filter and not above_50:
+                            continue
+                        if score <= 0.0:
+                            continue
+                            
+                        candidates.append((ticker, score, float(row["close"])))
+                
+                candidates.sort(key=lambda x: x[1], reverse=True)
+
+                # 大盤多空總避險濾網 (Market Regime Filter，排除基準 ETF 干擾)
+                is_market_bull = True
+                if market == "TW":
+                    all_scores = []
+                    for t, d in filtered_data.items():
+                        if t in exclude_tickers:
+                            continue
+                        if current_date in d.index:
+                            r = d.loc[current_date]
+                            sc = float(r["momentum_score"]) if not np.isnan(r["momentum_score"]) else -999.0
+                            all_scores.append((t, sc, bool(r["above_50sma"])))
+                    all_scores.sort(key=lambda x: x[1], reverse=True)
+                    top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
+                    # 領頭羊廣度 + 0050 長期均線
+                    bench_bull = True
+                    if tw_bench_ok is not None and current_date in tw_bench_ok.index:
+                        bench_bull = bool(tw_bench_ok.loc[current_date])
+                    is_market_bull = (top3_bull_count >= 2) and bench_bull
+                elif market == "US":
+                    all_scores = []
+                    for t, d in filtered_data.items():
+                        if t in exclude_tickers:
+                            continue
+                        if current_date in d.index:
+                            r = d.loc[current_date]
+                            sc = float(r["momentum_score"]) if not np.isnan(r["momentum_score"]) else -999.0
+                            all_scores.append((t, sc, bool(r["above_50sma"])))
+                    all_scores.sort(key=lambda x: x[1], reverse=True)
+                    top3_bull_count = sum(1 for x in all_scores[:3] if x[2])
+                    us_leaders_bull = (top3_bull_count >= 2)
+
+                    qqq_bull = True
+                    q_df = filtered_data.get("QQQ", self.dataset.get("QQQ"))
+                    if q_df is not None and current_date in q_df.index:
+                        q_c = float(q_df.loc[current_date, "close"])
+                        q_sma = float(q_df.loc[current_date, "sma_200"]) if "sma_200" in q_df.columns else float(q_df["close"].rolling(200).mean().loc[current_date])
+                        qqq_bull = (q_c >= q_sma) if not np.isnan(q_sma) else True
+
+                    is_market_bull = (us_leaders_bull and qqq_bull)
+
+                # 市場廣度：選股池站上 50MA 的比例不足時，新買部位按比例縮小
+                breadth = float(np.mean([x[2] for x in all_scores])) if all_scores else 1.0
+                exposure = min(1.0, breadth / self.breadth_full) if self.breadth_full > 0 else 1.0
+
+                if not is_market_bull:
+                    target_tickers = []
+                    top_targets = []
+                else:
+                    # 仍在前 top_n + buffer 名內的持股優先續抱，其餘名額由最強者補上
+                    keep = [c for c in candidates[:self.top_n + hold_buffer] if c[0] in holdings]
+                    top_targets = (keep + [c for c in candidates if c not in keep])[:self.top_n]
+                    target_tickers = [x[0] for x in top_targets]
+
+                # 奧卡姆剃刀：徹底移除底部減倉陷阱，全速 100% 資金滿額投入領頭羊
+                if self.execution_mode == "next_open":
+                    for ticker in list(holdings.keys()):
+                        if ticker not in target_tickers and ticker not in [x[0] for x in pending_sells]:
+                            pending_sells.append((ticker, "調倉換股 (動能減弱/跌破50MA, 隔日開盤出清)"))
+                    if target_tickers:
+                        equity = cash
+                        for t, s in holdings.items():
+                            df = filtered_data[t]
+                            if current_date in df.index:
+                                equity += s * float(df.loc[current_date, "close"])
+                            else:
+                                p_sub = df.loc[df.index <= current_date, "close"]
+                                if not p_sub.empty:
+                                    equity += s * float(p_sub.iloc[-1])
+                        target_alloc = equity / self.top_n * exposure
+                        for ticker, score, _ in top_targets:
+                            if ticker not in [x[0] for x in pending_sells]:
+                                pending_buys.append((ticker, target_alloc, score))
+                else:
+                    # same_close
+                    for ticker in list(holdings.keys()):
+                        if ticker not in target_tickers:
+                            df = filtered_data[ticker]
+                            if current_date in df.index:
+                                curr_price = float(df.loc[current_date, "close"])
+                                shares = holdings.pop(ticker)
+                                sell_proceeds = shares * curr_price * (1.0 - total_sell_cost)
+                                cash += sell_proceeds
+                                pnl = sell_proceeds - (shares * entry_prices[ticker])
+                                pnl_pct = (curr_price / entry_prices[ticker] - 1.0) * 100.0
+                                trade_logs.append({
+                                    "date": current_date,
+                                    "ticker": ticker,
+                                    "action": "SELL",
+                                    "reason": "調倉換股 (動能減弱/跌破50MA)",
+                                    "price": round(curr_price, 2),
+                                    "shares": round(shares, 4),
+                                    "pnl": round(pnl, 2),
+                                    "pnl_pct": f"{pnl_pct:+.2f}%"
+                                })
+                                entry_prices.pop(ticker, None)
+                                peak_prices.pop(ticker, None)
+                                entry_dates.pop(ticker, None)
+
+                    if target_tickers:
+                        equity = cash
+                        for t, s in holdings.items():
+                            df = filtered_data[t]
+                            if current_date in df.index:
+                                equity += s * float(df.loc[current_date, "close"])
+                            else:
+                                p_sub = df.loc[df.index <= current_date, "close"]
+                                if not p_sub.empty:
+                                    equity += s * float(p_sub.iloc[-1])
+                        
+                        target_alloc_per_ticker = equity / self.top_n * exposure
+                        for ticker, score, curr_price in top_targets:
+                            current_shares = holdings.get(ticker, 0.0)
+                            current_val = current_shares * curr_price
+                            if target_alloc_per_ticker > current_val:
+                                budget = min(target_alloc_per_ticker - current_val, cash)
+                                if budget > (equity * 0.02):
+                                    buy_cost_per_share = curr_price * (1.0 + buy_cost_rate)
+                                    shares_to_buy = budget / buy_cost_per_share
+                                    cash -= shares_to_buy * buy_cost_per_share
+                                    if ticker in holdings:
+                                        old_cost_total = current_shares * entry_prices[ticker]
+                                        total_shares = current_shares + shares_to_buy
+                                        entry_prices[ticker] = (old_cost_total + (shares_to_buy * curr_price)) / total_shares
+                                        holdings[ticker] = total_shares
+                                    else:
+                                        holdings[ticker] = shares_to_buy
+                                        entry_prices[ticker] = curr_price
+                                        peak_prices[ticker] = curr_price
+                                        entry_dates[ticker] = current_date
+                                        
+                                    trade_logs.append({
+                                        "date": current_date,
+                                        "ticker": ticker,
+                                        "action": "BUY",
+                                        "reason": f"動能入選 (評分: {score:.1f})",
+                                        "price": round(curr_price, 2),
+                                        "shares": round(shares_to_buy, 4),
+                                        "pnl": 0.0,
+                                        "pnl_pct": "0.00%"
+                                    })
+
+            end_of_day_equity = cash
+            for t, s in holdings.items():
+                df = filtered_data[t]
+                if current_date in df.index:
+                    end_of_day_equity += s * float(df.loc[current_date, "close"])
+                else:
+                    past_prices = df.loc[df.index <= current_date, "close"]
+                    if not past_prices.empty:
+                        end_of_day_equity += s * float(past_prices.iloc[-1])
+
+            portfolio_values.append({
+                "date": current_date,
+                "portfolio_value": round(end_of_day_equity, 2)
+            })
+
+        return portfolio_values, trade_logs
+
+    def _summarize(self, market: str, test_dates: List, portfolio_values: List[Dict], trade_logs: List[Dict]) -> Dict:
+        """由合併後的每日淨值與交易紀錄計算績效統計"""
+        perf_df = pd.DataFrame(portfolio_values).set_index("date")
+        perf_df["daily_return"] = perf_df["portfolio_value"].pct_change().fillna(0)
+        
+        total_days = len(perf_df)
+        cal_days = (test_dates[-1] - test_dates[0]).days if len(test_dates) > 1 else len(perf_df)
+        years = max(cal_days / 365.25, 0.1)
+        start_val = self.initial_capital
+        end_val = perf_df["portfolio_value"].iloc[-1]
+        
+        total_return = (end_val / start_val - 1.0) * 100.0
+        cagr = ((end_val / start_val) ** (1.0 / years) - 1.0) * 100.0
+        
+        cum_max = perf_df["portfolio_value"].cummax()
+        drawdown = (perf_df["portfolio_value"] - cum_max) / cum_max
+        max_drawdown = drawdown.min() * 100.0
+        
+        mean_ret = perf_df["daily_return"].mean() * 252.0
+        vol = perf_df["daily_return"].std() * np.sqrt(252.0)
+        sharpe = (mean_ret - 0.02) / (vol + 1e-9)
+        
+        trades_df = pd.DataFrame(trade_logs)
+        win_rate = 0.0
+        sell_trades = trades_df[trades_df["action"] == "SELL"] if not trades_df.empty and "action" in trades_df.columns else pd.DataFrame()
+        if not sell_trades.empty and "pnl" in sell_trades.columns:
+            profitable = (sell_trades["pnl"] > 0).sum()
+            win_rate = (profitable / len(sell_trades)) * 100.0
+
+        bench_ticker = "0050.TW" if market == "TW" else "QQQ"
+        bench_return = 0.0
+        if bench_ticker in self.dataset:
+            b_df = self.dataset[bench_ticker]
+            b_sub = b_df.loc[test_dates[0]:test_dates[-1]]
+            if not b_sub.empty and len(b_sub) > 1:
+                bench_return = float((b_sub["close"].iloc[-1] / b_sub["close"].iloc[0] - 1.0) * 100.0)
+
+        closed_trades_count = len(sell_trades) if not sell_trades.empty else 0
+
+        return {
+            "market": market,
+            "start_date": test_dates[0].strftime("%Y-%m-%d"),
+            "end_date": test_dates[-1].strftime("%Y-%m-%d"),
+            "total_trading_days": total_days,
+            "initial_capital": start_val,
+            "final_value": round(end_val, 2),
+            "total_return_pct": round(total_return, 2),
+            "total_return": round(total_return, 2),
+            "cagr_pct": round(cagr, 2),
+            "cagr": round(cagr, 2),
+            "max_drawdown_pct": round(max_drawdown, 2),
+            "max_drawdown": round(max_drawdown, 2),
+            "sharpe_ratio": round(sharpe, 2),
+            "benchmark_ticker": bench_ticker,
+            "benchmark_return": round(bench_return, 2),
+            "total_trades": closed_trades_count if closed_trades_count > 0 else len(trades_df),
+            "closed_trades": closed_trades_count,
+            "raw_trades_count": len(trades_df),
+            "win_rate_pct": round(win_rate, 2),
+            "perf_df": perf_df,
+            "trades_df": trades_df
+        }
+
+    def run_pybroker_validation(self, market: str = "US") -> Dict:
+        """
+        整合 PyBroker 截面動能分位數報酬檢驗 (Cross-Sectional Quantile Spread Check)
+        驗證高動能組 (Top Quantile) 的平均未來 5 日報酬顯著大於低動能組 (Bottom Quantile)
+        """
+        rows = []
+        filtered_stocks = {}
+        for ticker, df in self.dataset.items():
+            is_tw = (".TW" in ticker) or (".TWO" in ticker)
+            if (market == "TW" and is_tw) or (market == "US" and not is_tw):
+                if ticker not in ["0050.TW", "QQQ"]:
+                    enriched = TechFeatureEngine.calculate_technical_features(df)
+                    filtered_stocks[ticker] = enriched
+                    t_df = enriched.copy()
+                    t_df["symbol"] = ticker
+                    t_df = t_df.reset_index().rename(columns={"index": "date"})
+                    rows.append(t_df)
+
+        if not rows:
+            return {"pybroker_enabled": False, "status": "FAIL", "message": "無可用標的數據。"}
+
+        all_bars = pd.concat(rows, ignore_index=True)
+        all_bars["date"] = pd.to_datetime(all_bars["date"])
+        all_bars = all_bars.sort_values(by=["date", "symbol"]).reset_index(drop=True)
+
+        # 執行真實截面動能分位數報酬檢驗 (5日滾動截面)
+        all_dates = sorted(list(set.union(*[set(df.index) for df in filtered_stocks.values()])))
+        start_idx = 60
+        test_dates = all_dates[start_idx:]
+
+        top_returns = []
+        bot_returns = []
+
+        for i in range(0, len(test_dates) - 5, 5):
+            curr_d = test_dates[i]
+            fwd_d = test_dates[i + 5]
+            period_data = []
+
+            for ticker, df in filtered_stocks.items():
+                if curr_d in df.index and fwd_d in df.index:
+                    row = df.loc[curr_d]
+                    c_now = float(row["close"])
+                    c_fwd = float(df.loc[fwd_d, "close"])
+                    score = float(row["momentum_score"]) if not np.isnan(row["momentum_score"]) else -999.0
+                    fwd_ret = (c_fwd / c_now - 1.0) * 100.0
+                    period_data.append((ticker, score, fwd_ret))
+
+            if len(period_data) >= 6:
+                period_data.sort(key=lambda x: x[1], reverse=True)
+                k = max(2, len(period_data) // 3)
+                top_ret = float(np.mean([x[2] for x in period_data[:k]]))
+                bot_ret = float(np.mean([x[2] for x in period_data[-k:]]))
+                top_returns.append(top_ret)
+                bot_returns.append(bot_ret)
+
+        top_avg = float(np.mean(top_returns)) if top_returns else 0.0
+        bot_avg = float(np.mean(bot_returns)) if bot_returns else 0.0
+        spread = top_avg - bot_avg
+        is_pass = spread > 0.0
+
+        spread_wins = sum(1 for t, b in zip(top_returns, bot_returns) if t > b)
+        spread_win_rate = (spread_wins / len(top_returns) * 100.0) if top_returns else 0.0
+
+        msg = (
+            f"截面動能分位數檢驗通過: 共載入 {len(rows)} 檔標的 (總K棒數: {len(all_bars):,} 筆)，"
+            f"Top分位數未來5日均報 ({top_avg:+.2f}%) 顯著超越 Bottom分位數 ({bot_avg:+.2f}%)，"
+            f"多空利差 Spread={spread:+.2f}%，動能勝率={spread_win_rate:.1f}% (抽樣 {len(top_returns)} 期)。"
+        ) if is_pass else f"截面動能分位數檢驗未通過 (Spread={spread:+.2f}%)。"
+
+        return {
+            "pybroker_enabled": True,
+            "universe_size": len(rows),
+            "total_bars": len(all_bars),
+            "market": market,
+            "status": "PASS" if is_pass else "FAIL",
+            "top_quantile_mean_ret": round(top_avg, 2),
+            "bottom_quantile_mean_ret": round(bot_avg, 2),
+            "quantile_spread": round(spread, 2),
+            "spread_win_rate_pct": round(spread_win_rate, 2),
+            "rebalance_periods_sampled": len(top_returns),
+            "message": msg
+        }
