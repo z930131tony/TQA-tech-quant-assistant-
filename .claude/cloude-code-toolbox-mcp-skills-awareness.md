@@ -1,6 +1,6 @@
 # Claude Code ToolBox — MCP & Skills awareness
 
-_Generated: 2026-11-14T05:00:45.770Z_
+_Generated: 2026-11-16T20:31:42.826Z_
 
 ## How to use this report
 
@@ -35,6 +35,24 @@ _None found (or no workspace open)._
 
 - **hallmark** — `C:\Users\Tony\.claude\skills\hallmark`
   - Design skill for websites and new pages that look designed, not generated. Use when the user asks to build or design something new, or names Hallmark. Never use it on an existing design unless the user names Hallmark, as
+
+- **ponytail** — `C:\Users\Tony\.claude\skills\ponytail`
+  - >
+
+- **ponytail-audit** — `C:\Users\Tony\.claude\skills\ponytail-audit`
+  - >
+
+- **ponytail-debt** — `C:\Users\Tony\.claude\skills\ponytail-debt`
+  - >
+
+- **ponytail-gain** — `C:\Users\Tony\.claude\skills\ponytail-gain`
+  - >
+
+- **ponytail-help** — `C:\Users\Tony\.claude\skills\ponytail-help`
+  - >
+
+- **ponytail-review** — `C:\Users\Tony\.claude\skills\ponytail-review`
+  - >
 
 ---
 
