@@ -7,9 +7,10 @@ import io
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
-from src.notifier import LineNotifier
+from src.notify.line_bot import LineNotifier
 
 def main():
     print("=" * 60)

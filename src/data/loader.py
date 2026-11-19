@@ -16,10 +16,10 @@ except ImportError:
     CURL_CFFI_AVAILABLE = False
 
 import yfinance as yf
-from src.config import config, TECH_UNIVERSE_US, TECH_UNIVERSE_TW
+from src.config import config, TECH_UNIVERSE_US, TECH_UNIVERSE_TW, ROOT_DIR
 
 class TechDataLoader:
-    def __init__(self, cache_dir: str = "data_cache"):
+    def __init__(self, cache_dir: str = os.path.join(ROOT_DIR, "data_cache")):
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
         self.curl_session = None

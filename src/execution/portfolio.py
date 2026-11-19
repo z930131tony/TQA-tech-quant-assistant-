@@ -16,9 +16,10 @@ from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
 import numpy as np
 import pytz
-from src.config import TECH_UNIVERSE_TW, config
+from src.config import TECH_UNIVERSE_TW, config, ROOT_DIR
+from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT, hard_stop_hit, trailing_stop_hit
 
-PORTFOLIO_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "portfolio.json")
+PORTFOLIO_FILE = os.path.join(ROOT_DIR, "portfolio.json")
 
 class PortfolioTracker:
     @classmethod
@@ -282,14 +283,14 @@ class PortfolioTracker:
             # 1. 戰術絕對硬停損 (-30%)
             # 2. 移動停利停損 (-8%，進場隔日後啟動)
             # ----------------------------------------------------
-            hard_stop_triggered = (return_pct <= -30.0)
+            hard_stop_triggered = cost_price > 0 and hard_stop_hit(cost_price, curr_price)
             
             # 移動停損僅在進場隔日後生效 (T+1 以後)
             is_past_entry_day = True
             if entry_date:
                 latest_date_str = df.index[-1].strftime("%Y-%m-%d") if hasattr(df.index[-1], "strftime") else str(df.index[-1])[:10]
                 is_past_entry_day = (latest_date_str > entry_date)
-            trailing_stop_triggered = (drawdown_from_peak <= -8.0) and is_past_entry_day
+            trailing_stop_triggered = trailing_stop_hit(peak_price, curr_price) and is_past_entry_day
 
             # 警報彙整
             alerts = []
@@ -305,10 +306,10 @@ class PortfolioTracker:
             alert_text = " + ".join(alerts) if has_alert else "多頭軌道安全"
 
             # 緩衝安全距離計算 (供 UI 與診斷面板顯示)
-            dist_to_trailing = drawdown_from_peak - (-8.0)   # 若為正代表距 -8% 還有多少 % 安全緩衝
-            dist_to_hard = return_pct - (-30.0)              # 若為正代表距 -30% 還有多少 % 安全緩衝
-            trailing_stop_price = peak_price * 0.92
-            hard_stop_price = cost_price * 0.70
+            dist_to_trailing = drawdown_from_peak + TRAILING_STOP_PCT * 100  # 若為正代表距 -8% 還有多少 % 安全緩衝
+            dist_to_hard = return_pct + HARD_STOP_PCT * 100            # 若為正代表距 -30% 還有多少 % 安全緩衝
+            trailing_stop_price = peak_price * (1 - TRAILING_STOP_PCT)
+            hard_stop_price = cost_price * (1 - HARD_STOP_PCT)
 
             eval_item = {
                 "ticker": ticker,

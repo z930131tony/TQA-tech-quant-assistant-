@@ -10,13 +10,14 @@
 """
 import os
 import json
+import base64
 from datetime import datetime
 import pandas as pd
 import numpy as np
 from typing import Dict, Optional
-from src.config import TECH_UNIVERSE_TW
-from src.portfolio import PortfolioTracker
-from src.mascot_data import MASCOT_BASE64
+from src.config import TECH_UNIVERSE_TW, ROOT_DIR
+from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT
+from src.execution.portfolio import PortfolioTracker
 
 RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="zh-TW">
@@ -1037,7 +1038,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
     <!-- 🐣 吉祥物桌寵 (視窗邊緣巡邏伴讀) -->
     <div id="mascot-box" class="mascot-container">
         <div id="mascot-bubble" class="mascot-bubble">摸摸我！看多不追高 🐣</div>
-        <img id="mascot-img" class="mascot-avatar" onclick="petMascot()" src="data:image/png;base64,__MASCOT_BASE64__" alt="TQA 吉祥物" title="點我摸摸！">
+        <img id="mascot-img" class="mascot-avatar" onclick="petMascot()" src="data:image/webp;base64,__MASCOT_BASE64__" alt="TQA 吉祥物" title="點我摸摸！">
     </div>
 
     <script>
@@ -1624,7 +1625,7 @@ RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
                         return;
                     }
                     localStorage.setItem('tqa_custom_portfolio', JSON.stringify(parsed));
-                    alert("✅ 成功匯入 " + parsed.length + " 筆持倉！請於本地終端機執行 py generate_web.py 重新產生儀表板。");
+                    alert("✅ 成功匯入 " + parsed.length + " 筆持倉！請於本地終端機執行 py main.py web 重新產生儀表板。");
                 } catch(err) {
                     alert("匯入失敗：無效的 JSON 檔案內容 (" + err.message + ")");
                 }
@@ -1781,7 +1782,7 @@ class WebDashboardGenerator:
 
             prefix = "NT$" if is_tw else "$"
             market_tag = "tw" if is_tw else "us"
-            stop_price = price * 0.92
+            stop_price = price * (1 - TRAILING_STOP_PCT)
             stop_price_str = f"NT${stop_price:,.1f}" if is_tw else f"${stop_price:,.2f}"
             
             ret1d_color = "#34d399" if ret1d >= 0 else "#f87171"
@@ -1873,7 +1874,7 @@ class WebDashboardGenerator:
             shares_str = f"{int(shares_val)}" if float(shares_val).is_integer() else f"{shares_val:g}"
 
             step_buy_p = cost_p * 0.90
-            hard_stop_p = cost_p * 0.70
+            hard_stop_p = cost_p * (1 - HARD_STOP_PCT)
 
             badge_html = f'<span class="badge badge-bear" style="background:#450a0a; color:#f87171; border:1px solid #991b1b;">⚠️ {p.get("alert_text", "")}</span>' if p.get("has_alert") else '<span class="badge badge-bull">✅ 續抱中</span>'
             
@@ -1951,8 +1952,8 @@ class WebDashboardGenerator:
             bear_sum = d.get("bear_summary", "留意高檔波動與技術面拉回風險。")
             action = d.get("tactical_action", "採分批建倉，嚴格守好停損價位。")
             step_p = float(d.get("step_buy_10pct_price", price * 0.90))
-            hard_stop_p = float(d.get("hard_stop_30pct_price", price * 0.70))
-            trail_stop_p = price * 0.92
+            hard_stop_p = float(d.get("hard_stop_30pct_price", price * (1 - HARD_STOP_PCT)))
+            trail_stop_p = price * (1 - TRAILING_STOP_PCT)
             is_ai = d.get("ai_powered", False)
             prefix = "NT$" if is_tw else "$"
 
@@ -2096,7 +2097,7 @@ class WebDashboardGenerator:
         us_trades_df: Optional[pd.DataFrame] = None
     ) -> str:
         """打包歷史數據與回測買賣點供 TradingView 渲染"""
-        from src.features import TechFeatureEngine
+        from src.strategy.features import TechFeatureEngine
         db = {}
         for ticker, raw_df in dataset.items():
             enriched = TechFeatureEngine.calculate_technical_features(raw_df)
@@ -2266,7 +2267,7 @@ class WebDashboardGenerator:
 
         # 2.5 計算 OOS 盲測防過擬合認證指標 (切分點 2025-06-30，OOS 從 2025-07-01 起算)
         try:
-            from src.backtester import TechBacktester
+            from src.backtest.engine import TechBacktester
             tw_is = TechBacktester(dataset, end_date="2025-06-30").run("TW")
             tw_oos = TechBacktester(dataset, start_date="2025-07-01").run("TW")
             tw_is_sh = float(tw_is.get("sharpe_ratio", 1.0))
@@ -2299,7 +2300,7 @@ class WebDashboardGenerator:
         # 4.5 AI 多空對決戰情卡片 (TradingAgents)
         if ai_debate_data is None:
             try:
-                from src.ai_debate import run_daily_ai_debate
+                from src.intelligence.ai_debate import run_daily_ai_debate
                 ai_debate_data = run_daily_ai_debate(tw_rank, us_rank, target_market="ALL", positions=portfolio_positions)
             except Exception as ai_err:
                 print(f"ℹ️ AI 辯論載入跳過 ({ai_err})")
@@ -2361,7 +2362,8 @@ class WebDashboardGenerator:
         html = html.replace("__EQUITY_CURVE_TW_JSON__", tw_equity_json)
         html = html.replace("__EQUITY_CURVE_US_JSON__", us_equity_json)
         html = html.replace("__STOCKS_DATABASE_JSON__", stocks_db_json)
-        html = html.replace("__MASCOT_BASE64__", MASCOT_BASE64)
+        with open(os.path.join(ROOT_DIR, "assets", "mascot.webp"), "rb") as img:
+            html = html.replace("__MASCOT_BASE64__", base64.b64encode(img.read()).decode())
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)

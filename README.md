@@ -60,7 +60,7 @@
      - 已平倉交易：150 筆，勝率：**50.00%**
 
 6. **機構級樣本外檢驗與 PyBroker 截面驗證 (Institutional OOS & PyBroker Audit)**：
-   - 內建 `oos_validation.py`，通過六大嚴苛檢驗標準：
+   - 內建 `tests/oos_validation.py`，通過六大嚴苛檢驗標準：
      - **特徵因果檢驗**：未來數據放大 10 倍注入，過去 32 項指標絕對差異 0.000000（0 前瞻偷看 / Zero Lookahead Bias）。
      - **異常數據掃描**：全池 41 檔無拆股除權異常、0 筆成交量 $\le 0$ 幽靈 K 棒，日期與基準 100% 同步。
      - **四重機構門檻 (切分點 2025-06-30)**：
@@ -92,26 +92,23 @@
 TQA/
 ├── .github/workflows/
 │   └── daily_schedule.yml      # GitHub Actions 雙時區定時自動執行工作流
+├── main.py                     # 統一入口：daily / sim / backtest / web / trade / validate
+├── assets/mascot.webp          # 儀表板吉祥物圖檔
 ├── src/
-│   ├── config.py               # 股票池定義、動量權重與風控參數
-│   ├── data_loader.py          # FinMind 主力 + yfinance 備援 + curl_cffi 偽裝之數據下載引擎
-│   ├── features.py             # Numba 向量化技術指標、夏普動量與量價結構
-│   ├── backtester.py           # 向量化與 PyBroker 截面動能回測、雙重風控架構
-│   ├── trader.py               # 永豐 Shioaji API 同步、半自動零股委託防呆下單
-│   ├── portfolio.py            # Google Sheets 雲端持倉、-8% 移動停損與 -30% 戰術硬停損
-│   ├── ai_debate.py            # TradingAgents AI 多空對抗辯論模組 (Gemini 2.5 Flash)
-│   ├── notifier.py             # LINE Messaging API 圖文排程推播與 AI 裁決摘要
-│   ├── web_generator.py        # TradingView 互動暗黑儀表板、AI 戰情室與零股精算面板
-│   └── mascot_data.py          # 儀表板吉祥物小黃雞桌寵互動模組
+│   ├── config.py               # 股票池定義、動量權重與策略參數
+│   ├── core/                   # 回測與實盤共用：台股 Tick、手續費與證交稅、雙軌停損
+│   ├── data/loader.py          # FinMind 主力 + yfinance 備援 + curl_cffi 偽裝之數據下載引擎
+│   ├── strategy/features.py    # Numba 向量化技術指標、夏普動量與量價結構
+│   ├── backtest/engine.py      # 向量化與 PyBroker 截面動能回測 (next_open 成交)
+│   ├── execution/trader.py     # 永豐 Shioaji API 同步、零股委託防呆下單
+│   ├── execution/portfolio.py  # Google Sheets 雲端持倉與停損評估
+│   ├── intelligence/ai_debate.py # AI 多空對抗辯論模組 (Gemini 2.5 Flash)
+│   ├── notify/line_bot.py      # LINE Messaging API 推播
+│   ├── web/generator.py        # TradingView 互動儀表板產生器
+│   └── commands/               # main.py 各指令的實作
+├── tests/                      # oos_validation、test_full_system、test_risk_and_rules、test_line
 ├── index.html                  # 靜態響應式看盤網站 (自動部署至 GitHub Pages)
 ├── portfolio.json              # 本地持股庫存與成本紀錄 (雲端斷線時之備援)
-├── run_daily.py                # 每日定時自動化主程式 (--market TW/US/AUTO, --skip-data)
-├── run_simulation.py           # 虛擬交易與個人庫存移動停損評估腳本 (--market, --skip-data)
-├── run_backtest.py             # 全歷史回測執行腳本 (--skip-data)
-├── oos_validation.py           # 機構級六大樣本外盲測、PyBroker 截面驗證與防偷看檢驗腳本 (--skip-data)
-├── verify_step1.py             # 41 檔股票池動能評分與多空生命線快速檢驗腳本 (--skip-data)
-├── generate_web.py             # 獨立生成靜態看盤網站儀表板腳本 (--skip-data)
-├── test_full_system.py         # 全系統 8 大模組自動化驗收測試腳本
 ├── requirements.txt            # Python 核心依賴清單
 ├── requirements-local.txt      # 永豐金證券 Shioaji 本地環境選用依賴
 └── .env.example                # 環境變數設定範本 (LINE API、Shioaji、Gemini API)
@@ -142,31 +139,27 @@ PORTFOLIO_SHEET_URL=https://docs.google.com/spreadsheets/d/e/.../pub?output=csv
 #### 3. 核心指令操作
 - **執行全系統 6 大模組自動化驗收**：
   ```bash
-  python test_full_system.py
+  python tests/test_full_system.py
   ```
 - **執行機構級樣本外 (OOS) 盲測檢驗**（支援極速離線驗證）：
   ```bash
-  python oos_validation.py --skip-data
+  python main.py validate --skip-data
   ```
 - **執行歷史回測分析**：
   ```bash
-  python run_backtest.py --skip-data
-  ```
-- **快速檢驗 41 檔科技池評分與多空狀態**：
-  ```bash
-  python verify_step1.py --skip-data
+  python main.py backtest --skip-data
   ```
 - **執行虛擬交易與個人部位風控評估**：
   ```bash
-  python run_simulation.py --market AUTO --skip-data
+  python main.py sim --market AUTO --skip-data
   ```
 - **生成靜態看盤網站 (index.html)**：
   ```bash
-  python generate_web.py --skip-data
+  python main.py web --skip-data
   ```
 - **手動執行每日完整生產排程**：
   ```bash
-  python run_daily.py --market AUTO
+  python main.py daily --market AUTO
   ```
 
 ---
@@ -212,7 +205,7 @@ Powered by **FinMind split/dividend-adjusted historical feeds**, **multi-factor 
    - **Google Sheets Mobile Sync**: Maintains dual support for cloud position updates via mobile spreadsheet.
 
 6. **Institutional Out-of-Sample (OOS) & PyBroker Validation**:
-   - Validated via `oos_validation.py` against 6 institutional benchmarks:
+   - Validated via `tests/oos_validation.py` against 6 institutional benchmarks:
      - **Causality & Lookahead Audit**: Multiplied future prices by 10x; verified 0.000000 indicator deviation across 32 features (Zero Lookahead Bias).
      - **Data Anomaly Verification**: Zero unadjusted split drops, zero volume $\le 0$ phantom bars, 100% synchronized benchmark dates.
      - **Four-Point OOS Criteria (Cutoff 2025-06-30)**:
@@ -244,26 +237,23 @@ Powered by **FinMind split/dividend-adjusted historical feeds**, **multi-factor 
 TQA/
 ├── .github/workflows/
 │   └── daily_schedule.yml      # Dual-timezone GitHub Actions automated workflow
+├── main.py                     # Single entry: daily / sim / backtest / web / trade / validate
+├── assets/mascot.webp          # Dashboard mascot image
 ├── src/
-│   ├── config.py               # Stock universe, momentum weights & risk thresholds
-│   ├── data_loader.py          # Primary FinMind + secondary yfinance + curl_cffi engine
-│   ├── features.py             # Numba vectorization, volatility-adjusted momentum & volume signals
-│   ├── backtester.py           # Vectorized & PyBroker cross-sectional backtester with dual stops
-│   ├── trader.py               # SinoPac Shioaji integration & semi-auto odd-lot execution lock
-│   ├── portfolio.py            # Google Sheets cloud portfolio, -8% trailing & -30% hard stops
-│   ├── ai_debate.py            # TradingAgents AI multi-agent debate module (Gemini 2.5 Flash)
-│   ├── notifier.py             # LINE Messaging API push delivery with AI debate summary
-│   ├── web_generator.py        # TradingView dashboard, AI debate arena & budgeting panel
-│   └── mascot_data.py          # Interactive mascot companion module
+│   ├── config.py               # Stock universe, momentum weights & strategy settings
+│   ├── core/                   # Shared by backtest & live: TW tick sizes, fees/tax, dual stops
+│   ├── data/loader.py          # Primary FinMind + secondary yfinance + curl_cffi engine
+│   ├── strategy/features.py    # Numba vectorization, volatility-adjusted momentum & volume signals
+│   ├── backtest/engine.py      # Vectorized & PyBroker cross-sectional backtester (next_open fills)
+│   ├── execution/trader.py     # SinoPac Shioaji integration & odd-lot order guards
+│   ├── execution/portfolio.py  # Google Sheets cloud portfolio & stop evaluation
+│   ├── intelligence/ai_debate.py # AI multi-agent debate module (Gemini 2.5 Flash)
+│   ├── notify/line_bot.py      # LINE Messaging API push delivery
+│   ├── web/generator.py        # TradingView dashboard generator
+│   └── commands/               # Implementations behind main.py subcommands
+├── tests/                      # oos_validation, test_full_system, test_risk_and_rules, test_line
 ├── index.html                  # Responsive dashboard deployed to GitHub Pages
 ├── portfolio.json              # Local fallback portfolio cache
-├── run_daily.py                # Main automated execution runner (--market TW/US/AUTO, --skip-data)
-├── run_simulation.py           # Virtual execution & trailing stop evaluator (--market, --skip-data)
-├── run_backtest.py             # Full historical backtest runner (--skip-data)
-├── oos_validation.py           # 6-in-1 institutional OOS & PyBroker validation suite (--skip-data)
-├── verify_step1.py             # Quick universe scoring & market regime verification (--skip-data)
-├── generate_web.py             # Standalone static web dashboard generator (--skip-data)
-├── test_full_system.py         # 8-in-1 automated end-to-end self-test suite
 ├── requirements.txt            # Minimal Python core dependencies
 ├── requirements-local.txt      # Optional local SinoPac Shioaji dependencies
 └── .env.example                # Environment variable configuration template
@@ -299,31 +289,27 @@ GEMINI_API_KEY=your_gemini_api_key
 #### 3. Core Commands
 - **Run Full 8-in-1 System Self-Test**:
   ```bash
-  python test_full_system.py
+  python tests/test_full_system.py
   ```
 - **Run Institutional OOS Validation Audit** (Fast offline mode supported):
   ```bash
-  python oos_validation.py --skip-data
+  python main.py validate --skip-data
   ```
 - **Run Historical Backtest**:
   ```bash
-  python run_backtest.py --skip-data
-  ```
-- **Quickly Verify Tech Universe Rankings & Regimes**:
-  ```bash
-  python verify_step1.py --skip-data
+  python main.py backtest --skip-data
   ```
 - **Run Simulated Trading & Trailing Stop Risk Audit**:
   ```bash
-  python run_simulation.py --market AUTO --skip-data
+  python main.py sim --market AUTO --skip-data
   ```
 - **Generate Static Web Dashboard (index.html)**:
   ```bash
-  python generate_web.py --skip-data
+  python main.py web --skip-data
   ```
 - **Run Daily Production Pipeline**:
   ```bash
-  python run_daily.py --market AUTO
+  python main.py daily --market AUTO
   ```
 
 ---

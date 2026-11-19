@@ -14,21 +14,18 @@
 """
 import os
 import sys
-import io
 import argparse
 from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 load_dotenv()
 
-from src.data_loader import TechDataLoader
-from src.features import TechFeatureEngine
-from src.portfolio import PortfolioTracker
-from src.trader import AutoTrader, SHIOAJI_AVAILABLE, sj
+from src.data.loader import TechDataLoader
+from src.strategy.features import TechFeatureEngine
+from src.execution.portfolio import PortfolioTracker
+from src.execution.trader import AutoTrader, SHIOAJI_AVAILABLE, sj
 
 try:
     from rich.console import Console

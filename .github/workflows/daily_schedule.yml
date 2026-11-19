@@ -49,8 +49,8 @@ jobs:
           PORTFOLIO_SHEET_URL: ${{ secrets.PORTFOLIO_SHEET_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          python run_daily.py --market ${{ github.event.inputs.market || 'AUTO' }}
-          python generate_web.py || true
+          python main.py daily --market ${{ github.event.inputs.market || 'AUTO' }}
+          python main.py web || true
 
       - name: Auto Commit and Push Updated Dashboard
         run: |

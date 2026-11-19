@@ -20,11 +20,12 @@ import pandas as pd
 # 強制 UTF-8 輸出，避免 Windows 終端編碼問題
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
-from src.data_loader import TechDataLoader
-from src.features import TechFeatureEngine
-from src.backtester import TechBacktester
+from src.data.loader import TechDataLoader
+from src.strategy.features import TechFeatureEngine
+from src.backtest.engine import TechBacktester
 
 
 def check_feature_causality(dataset: dict, test_symbol: str = "2330.TW") -> bool:

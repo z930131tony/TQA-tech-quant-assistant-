@@ -4,23 +4,20 @@
 """
 import sys
 import os
-import io
 import argparse
 from datetime import datetime
 import pytz
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.data_loader import TechDataLoader
-from src.features import TechFeatureEngine
-from src.backtester import TechBacktester
-from src.trader import AutoTrader
-from src.web_generator import WebDashboardGenerator
-from src.notifier import LineNotifier
-from src.portfolio import PortfolioTracker
-from src.ai_debate import run_daily_ai_debate
+from src.config import ROOT_DIR
+from src.data.loader import TechDataLoader
+from src.strategy.features import TechFeatureEngine
+from src.backtest.engine import TechBacktester
+from src.execution.trader import AutoTrader
+from src.web.generator import WebDashboardGenerator
+from src.notify.line_bot import LineNotifier
+from src.execution.portfolio import PortfolioTracker
+from src.intelligence.ai_debate import run_daily_ai_debate
 
 def get_auto_market() -> str:
     tw_tz = pytz.timezone("Asia/Taipei")
@@ -89,7 +86,7 @@ def main():
         print(f"⚠️ 策略回測運算異常 (已隔離): {e_bt}")
 
     # 4. 生成 index.html (核心交付物，最高優先級)
-    output_html = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    output_html = os.path.join(ROOT_DIR, "index.html")
     try:
         WebDashboardGenerator.generate_html(
             dataset=dataset,
