@@ -3,6 +3,9 @@
 """
 from dataclasses import dataclass
 from typing import List, Dict
+import os
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 美股科技核心追蹤名單 (21 檔：七巨頭 + 半導體晶片 + 設備 + AI軟體/資安 + 指標ETF)
 TECH_UNIVERSE_US: List[str] = [

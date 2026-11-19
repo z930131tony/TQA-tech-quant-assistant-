@@ -3,17 +3,14 @@
 """
 import sys
 import os
-import io
 import argparse
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.data_loader import TechDataLoader
-from src.features import TechFeatureEngine
-from src.backtester import TechBacktester
-from src.web_generator import WebDashboardGenerator
+from src.config import ROOT_DIR
+from src.data.loader import TechDataLoader
+from src.strategy.features import TechFeatureEngine
+from src.backtest.engine import TechBacktester
+from src.web.generator import WebDashboardGenerator
 
 def main():
     parser = argparse.ArgumentParser(description="TQA 科技量化網頁生成器")
@@ -40,7 +37,7 @@ def main():
     tw_backtest = backtester.run(market="TW")
 
     # 4. 生成 index.html
-    output_html = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    output_html = os.path.join(ROOT_DIR, "index.html")
     WebDashboardGenerator.generate_html(
         dataset=dataset,
         tw_rank=tw_rank,

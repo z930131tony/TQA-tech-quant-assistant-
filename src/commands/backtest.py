@@ -3,17 +3,13 @@
 """
 import sys
 import os
-import io
 import argparse
 import pandas as pd
 
 # 強制輸出為 UTF-8，避免 Windows cp950 編碼問題
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.data_loader import TechDataLoader
-from src.backtester import TechBacktester
+from src.data.loader import TechDataLoader
+from src.backtest.engine import TechBacktester
 
 def print_result_card(res: dict, benchmark_return: float, benchmark_name: str):
     total_ret = res.get("total_return_pct", res.get("total_return", 0.0))

@@ -14,7 +14,9 @@ except ImportError:
     PYBROKER_AVAILABLE = False
 
 from src.config import config
-from src.features import TechFeatureEngine
+from src.strategy.features import TechFeatureEngine
+from src.core.market_rules import BENCHMARK_TICKERS, TW_SELL_TAX
+from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT, hard_stop_hit, trailing_stop_hit
 
 class TechBacktester:
     def __init__(
@@ -22,12 +24,12 @@ class TechBacktester:
         dataset: Dict[str, pd.DataFrame], 
         initial_capital: float = 100000.0,
         fee_rate: float = 0.001,          # 單邊手續費與滑價 (0.1%)
-        tax_rate_tw: float = 0.003,       # 台股賣出證券交易稅 (0.3%)
+        tax_rate_tw: float = TW_SELL_TAX,     # 台股賣出證券交易稅 (0.3%)
         rebalance_freq: int = 5,           # 調倉頻率 (每 5 個交易日約一週)
         top_n: int = 3,                    # 持有前 N 強標的
         enable_50sma_filter: bool = True,  # 啟用 50MA 趨勢多空濾網
-        trailing_stop_pct: float = 0.08,   # 經典雙軌移動停利停損 8%
-        hard_stop_pct: float = 0.30,       # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
+        trailing_stop_pct: float = TRAILING_STOP_PCT,  # 經典雙軌移動停利停損 8%
+        hard_stop_pct: float = HARD_STOP_PCT,  # 30% 戰術絕對硬停損線 (Hard Stop-Loss)
         start_date: Optional[str] = None,  # 可指定回測起始日 (用於 OOS 樣本外測試)
         end_date: Optional[str] = None,    # 可指定回測結束日 (用於 IS 樣本內測試)
         execution_mode: str = "next_open", # 預設 T 日收盤出訊號、T+1 開盤成交 (專案規範 §5)
@@ -218,16 +220,14 @@ class TechBacktester:
                     entry_p = entry_prices.get(ticker, curr_price)
                     
                     # 1. 優先檢查 -30% 戰術絕對硬停損線 (Hard Stop-Loss)
-                    loss_from_cost = (entry_p - curr_price) / entry_p
-                    if loss_from_cost >= self.hard_stop_pct:
+                    if hard_stop_hit(entry_p, curr_price, self.hard_stop_pct):
                         liquidate_due_to_stop.append((ticker, curr_price, "戰術絕對停損 (虧損達30%)"))
                         continue
 
                     # 2. 檢查移動停利停損 (進場隔日後啟動最高價追蹤)
                     if entry_dates.get(ticker) and current_date > entry_dates[ticker]:
                         peak_prices[ticker] = max(peak_prices.get(ticker, curr_price), curr_price)
-                        drawdown_from_peak = (peak_prices[ticker] - curr_price) / peak_prices[ticker]
-                        if drawdown_from_peak >= curr_trailing_stop:
+                        if trailing_stop_hit(peak_prices[ticker], curr_price, curr_trailing_stop):
                             liquidate_due_to_stop.append((ticker, curr_price, f"停損平倉 (回檔達{curr_trailing_stop*100:.0f}%)"))
 
             stopped_out_today = {t for t, _, _ in liquidate_due_to_stop}
@@ -263,7 +263,7 @@ class TechBacktester:
             # B. 週期性調倉 (Rebalancing)
             if day_idx % self.rebalance_freq == phase % self.rebalance_freq:
                 candidates = []
-                exclude_tickers = ["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"]
+                exclude_tickers = BENCHMARK_TICKERS
                 for ticker, df in filtered_data.items():
                     # 排除基準指數與產業 ETF 混入個股選股池
                     if ticker in exclude_tickers:

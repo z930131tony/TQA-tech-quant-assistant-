@@ -15,7 +15,6 @@
 """
 import os
 import json
-import math
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 import pandas as pd
@@ -24,7 +23,10 @@ import pytz
 from dotenv import load_dotenv
 
 from src.config import TECH_UNIVERSE_TW, TECH_UNIVERSE_US
-from src.portfolio import PortfolioTracker, PORTFOLIO_FILE
+from src.execution.portfolio import PortfolioTracker, PORTFOLIO_FILE
+from src.core.market_rules import BENCHMARK_TICKERS, TW_SELL_TAX, TW_BROKER_FEE, TW_ODD_LOT_MAX, align_tw_price
+from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT, hard_stop_hit
+
 
 load_dotenv()
 
@@ -36,40 +38,14 @@ except ImportError:
     SHIOAJI_AVAILABLE = False
 
 
-def get_tw_tick_size(price: float) -> float:
-    """依台灣證券交易所規範計算股價升降單位 (Tick Size)"""
-    if price < 10.0:
-        return 0.01
-    elif price < 50.0:
-        return 0.05
-    elif price < 100.0:
-        return 0.10
-    elif price < 500.0:
-        return 0.50
-    elif price < 1000.0:
-        return 1.00
-    else:
-        return 5.00
-
-
-def align_tw_price(price: float, round_down: bool = True) -> float:
-    """將價格對齊台股升降單位 (Tick Size)，round_down 用於賣單讓價防踩跌停"""
-    tick = get_tw_tick_size(price)
-    if round_down:
-        aligned = math.floor(round(price / tick, 6)) * tick
-    else:
-        aligned = round(round(price / tick) * tick, 2)
-    return round(aligned, 2)
-
-
 class AutoTrader:
     def __init__(
         self,
         dataset: Dict[str, pd.DataFrame],
         budget_per_stock_tw: float = 30000.0,
         budget_per_stock_us: float = 1000.0,
-        trailing_stop_pct: float = 0.08,
-        hard_stop_pct: float = 0.30
+        trailing_stop_pct: float = TRAILING_STOP_PCT,
+        hard_stop_pct: float = HARD_STOP_PCT
     ):
         self.dataset = dataset
         self.base_budget_tw = budget_per_stock_tw
@@ -81,7 +57,7 @@ class AutoTrader:
     @staticmethod
     def _breadth_exposure(rank_df: pd.DataFrame, full_at: float = 0.6) -> float:
         """選股池 (不含 ETF) 站上 50MA 的比例 / 滿倉門檻，上限 1.0"""
-        stocks = rank_df[~rank_df["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])] if not rank_df.empty else rank_df
+        stocks = rank_df[~rank_df["ticker"].isin(BENCHMARK_TICKERS)] if not rank_df.empty else rank_df
         if stocks.empty:
             return 1.0
         return float(min(1.0, stocks["above_50sma"].mean() / full_at))
@@ -149,7 +125,7 @@ class AutoTrader:
             is_emergency = False
 
             # [第 1 優先] -30% 戰術絕對硬停損
-            if (cost_price - curr_price) / cost_price >= self.hard_stop_pct or pos.get("hard_stop_triggered", False):
+            if hard_stop_hit(cost_price, curr_price, self.hard_stop_pct) or pos.get("hard_stop_triggered", False):
                 sell_reason = f"🚨 戰術絕對硬停損 (累積虧損 {return_pct:.2f}% >= -30%)"
                 stopped_out_today.add(ticker)
                 is_emergency = True
@@ -174,8 +150,8 @@ class AutoTrader:
 
                 # 計算摩擦成本 (手續費 0.1425%, 台股證交稅 0.3%)
                 gross_amt = shares * curr_price
-                fee = max(1.0, round(gross_amt * 0.001425, 2))
-                tax = round(gross_amt * 0.003, 2) if is_tw else 0.0
+                fee = max(1.0, round(gross_amt * TW_BROKER_FEE, 2))
+                tax = round(gross_amt * TW_SELL_TAX, 2) if is_tw else 0.0
                 net_pnl = (curr_price - cost_price) * shares - fee - tax
 
                 order_dict = {
@@ -227,7 +203,7 @@ class AutoTrader:
                 tw_candidates = tw_rank[
                     (tw_rank["above_50sma"] == True) &
                     (tw_rank["score"] > 0.0) &
-                    (~tw_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
+                    (~tw_rank["ticker"].isin(BENCHMARK_TICKERS)) &
                     (~tw_rank["ticker"].isin(stopped_out_today | cooling))
                 ].head(5)
 
@@ -287,7 +263,7 @@ class AutoTrader:
                     if px <= 0:
                         continue
                     # 預留手續費與滑點緩衝
-                    shares = max(1, min(999, int(effective_budget_tw / (px * 1.0028))))
+                    shares = max(1, min(TW_ODD_LOT_MAX, int(effective_budget_tw / (px * 1.0028))))
                     cand_name = cand["name"]
 
                     orders.append({
@@ -341,7 +317,7 @@ class AutoTrader:
                 us_candidates = us_rank[
                     (us_rank["above_50sma"] == True) &
                     (us_rank["score"] > 0.0) &
-                    (~us_rank["ticker"].isin(["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"])) &
+                    (~us_rank["ticker"].isin(BENCHMARK_TICKERS)) &
                     (~us_rank["ticker"].isin(stopped_out_today | cooling))
                 ].head(5)
 
@@ -604,7 +580,7 @@ class AutoTrader:
             clean_code = ticker.split(".")[0]
 
             # 盤中零股只收 1~999 股，限價須對齊升降單位
-            if not 1 <= shares <= 999:
+            if not 1 <= shares <= TW_ODD_LOT_MAX:
                 print(f"  ❌ 【略過】{name} ({ticker}) {act} {shares} 股：盤中零股僅接受 1~999 股，請手動處理。")
                 results.append({**ord_item, "status": "REJECTED", "error": "零股股數須為 1~999"})
                 continue
@@ -660,7 +636,7 @@ class AutoTrader:
             px = float(sig.get("price", 0.0))
             if px <= 0:
                 continue
-            shares = max(1, min(999, int(default_budget / (px * 1.0028))))
+            shares = max(1, min(TW_ODD_LOT_MAX, int(default_budget / (px * 1.0028))))
             executed.append({
                 "ticker": t,
                 "name": sig.get("name", t),

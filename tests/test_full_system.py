@@ -18,12 +18,13 @@ import pandas as pd
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT_DIR)
 
-from src.data_loader import TechDataLoader
-from src.features import TechFeatureEngine
-from src.trader import AutoTrader
-from src.portfolio import PortfolioTracker, PORTFOLIO_FILE
+from src.data.loader import TechDataLoader
+from src.strategy.features import TechFeatureEngine
+from src.execution.trader import AutoTrader
+from src.execution.portfolio import PortfolioTracker, PORTFOLIO_FILE
 from src.config import TECH_UNIVERSE_TW, TECH_UNIVERSE_US
 
 results = {}
@@ -129,7 +130,7 @@ try:
     print(f"  ✅ 本地 JSON 讀取正常 (現有 {len(positions)} 筆部位，風控評估 {len(evaluated)} 筆)")
 
     # 4B. 雲端 Google Sheets CSV 讀取模擬測試
-    mock_csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock_sheet.csv")
+    mock_csv_path = os.path.join(ROOT_DIR, "mock_sheet.csv")
     with open(mock_csv_path, "w", encoding="utf-8") as f:
         f.write("ticker,shares,cost_price,entry_date\n2330.TW,100,1050,2026-10-01\nNVDA,10,135.5,2026-10-15\n")
     
@@ -162,7 +163,7 @@ finally:
 # -------------------------------------------------------------
 print("\n[測試 5/8] 驗證 index.html 檔案結構與 TradingView 腳本健康度...")
 try:
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    html_path = os.path.join(ROOT_DIR, "index.html")
     with open(html_path, "r", encoding="utf-8") as f:
         html = f.read()
 
@@ -193,7 +194,7 @@ except Exception as e:
 # -------------------------------------------------------------
 print("\n[測試 6/8] 驗證 GitHub Actions daily_schedule.yml 語法與排程定義...")
 try:
-    yml_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".github", "workflows", "daily_schedule.yml")
+    yml_path = os.path.join(ROOT_DIR, ".github", "workflows", "daily_schedule.yml")
     with open(yml_path, "r", encoding="utf-8") as f:
         yml_data = yaml.safe_load(f)
 
@@ -254,8 +255,8 @@ except Exception as e:
 # -------------------------------------------------------------
 print("\n[測試 8/8] 驗證 TradingAgents AI 辯論降級相容與 Shioaji API 安全防護...")
 try:
-    from src.ai_debate import conduct_single_debate, fetch_yahoo_news
-    from src.trader import SHIOAJI_AVAILABLE
+    from src.intelligence.ai_debate import conduct_single_debate, fetch_yahoo_news
+    from src.execution.trader import SHIOAJI_AVAILABLE
 
     # 1. 測試在無 API Key 下，AI 辯論模組優雅降級為量化規則合成 (含三大價量籌碼因子)
     fake_tech = {

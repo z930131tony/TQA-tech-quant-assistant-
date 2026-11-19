@@ -20,6 +20,7 @@ except ImportError:
     GOOGLE_GENAI_AVAILABLE = False
 
 from src.config import TECH_UNIVERSE_TW
+from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT
 
 def fetch_yahoo_news(ticker: str, limit: int = 4) -> List[str]:
     """
@@ -129,8 +130,8 @@ def conduct_single_debate(
     執行單一標的之三方多空對抗辯論
     """
     step_buy_10pct = round(price * 0.90, 2)
-    hard_stop_30pct = round(price * 0.70, 2)
-    trail_stop_8pct = round(price * 0.92, 2)
+    hard_stop_30pct = round(price * (1 - HARD_STOP_PCT), 2)
+    trail_stop_8pct = round(price * (1 - TRAILING_STOP_PCT), 2)
 
     # 1. 籌碼因子語意化轉譯
     evidence = _compile_chip_evidence(tech_info)
