@@ -6,21 +6,14 @@
       "cost_price": 348.51,
       "entry_date": "2026-11-11",
       "peak_price": 360.8299865722656
-    },
-    {
-      "ticker": "TSLA",
-      "shares": 2.0,
-      "cost_price": 393.3,
-      "entry_date": "2026-11-11",
-      "peak_price": 404.3999938964844
     }
   ],
   "peak_equity": 114921.2,
-  "current_drawdown_pct": 32.97,
+  "current_drawdown_pct": 54.14,
   "risk_scaling_factor": 1.0,
   "cash": 30000.0,
   "stop_log": {
     "AMD": "2026-11-17"
   },
-  "last_updated": "2026-11-20 03:36:53"
+  "last_updated": "2026-11-20 15:41:21"
 }
