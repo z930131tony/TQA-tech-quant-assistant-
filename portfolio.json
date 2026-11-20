@@ -16,11 +16,11 @@
     }
   ],
   "peak_equity": 114921.2,
-  "current_drawdown_pct": 32.26,
+  "current_drawdown_pct": 32.97,
   "risk_scaling_factor": 1.0,
   "cash": 30000.0,
   "stop_log": {
     "AMD": "2026-11-17"
   },
-  "last_updated": "2026-11-19 16:17:15"
+  "last_updated": "2026-11-20 03:36:53"
 }
