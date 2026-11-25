@@ -360,6 +360,11 @@ class TechDataLoader:
         df["symbol"] = ticker
         df = self._clean_data_frame(df)
 
+        # 幽靈 / 盤中未收盤 K 棒精確過濾：截掉晚於市場收盤預期日的數據
+        # 必須在補齊之前做，否則盤中 K 棒會讓下方判斷誤以為資料已是最新而跳過補齊
+        if not df.empty and df.index[-1].date() > expected_date:
+            df = df[df.index.date <= expected_date]
+
         # 6. 台股最新交易日拼接補齊 (FinMind 或 TWSE OpenAPI)
         if is_tw and not df.empty:
             # 優先以 FinMind 補足 yfinance 缺漏的最新幾根 K 棒
@@ -402,10 +407,6 @@ class TechDataLoader:
                     }], index=pd.DatetimeIndex([bar_dt], name="date"))
                     df = pd.concat([df, new_row])
                     df = self._clean_data_frame(df)
-
-        # 幽靈 / 盤中未收盤 K 棒精確過濾：若包含晚於市場收盤預期日之數據，予以截斷保護
-        if not df.empty and df.index[-1].date() > expected_date:
-            df = df[df.index.date <= expected_date]
 
         if df.empty or len(df) < min_rows:
             if os.path.exists(cache_file):

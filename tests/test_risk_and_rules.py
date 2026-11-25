@@ -30,4 +30,25 @@ assert not hard_stop_hit(100.0, 70.1)
 assert trailing_stop_hit(100.0, 92.0)
 assert not trailing_stop_hit(100.0, 92.1)
 
+# 模擬交易現金記帳：賣出加回淨額、買進扣除成本 (不碰真實 portfolio.json)
+from src.core.market_rules import TW_BROKER_FEE, TW_SELL_TAX, USD_TWD
+from src.execution.trader import AutoTrader
+from src.execution.portfolio import PortfolioTracker
+
+saved = {}
+PortfolioTracker.load_portfolio = classmethod(lambda cls, *a, **k: [{"ticker": "AAPL", "shares": 2}, {"ticker": "2330.TW", "shares": 10}])
+PortfolioTracker.save_portfolio = classmethod(lambda cls, positions, *a, extra_state=None, **k: saved.update(positions=positions, **(extra_state or {})))
+orders = [
+    {"action": "SELL", "ticker": "AAPL", "is_tw": False, "shares": 2, "price": 300.0},
+    {"action": "SELL", "ticker": "2330.TW", "is_tw": True, "shares": 10, "price": 2000.0},
+    {"action": "BUY", "ticker": "NVDA", "is_tw": False, "shares": 1, "price": 200.0},
+]
+trader = AutoTrader(dataset={})
+trader.generate_trade_orders = lambda *a, **k: (orders, {"cash": 10000.0, "stop_log": {}}, [])
+trader.execute_daily_simulation(None, None)
+# 手續費最低 1 元：AAPL 那筆 0.855 元以 1 元計
+expected = 10000.0 + (600 - 1.0) * USD_TWD + (20000 - 20000 * TW_BROKER_FEE - 20000 * TW_SELL_TAX) - (200 + 1.0) * USD_TWD
+assert abs(saved["cash"] - round(expected, 2)) < 0.01, saved["cash"]
+assert [p["ticker"] for p in saved["positions"]] == ["NVDA"]
+
 print("OK: risk and tick rules")

@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 from src.config import TECH_UNIVERSE_TW, TECH_UNIVERSE_US
 from src.execution.portfolio import PortfolioTracker, PORTFOLIO_FILE
-from src.core.market_rules import BENCHMARK_TICKERS, TW_SELL_TAX, TW_BROKER_FEE, TW_ODD_LOT_MAX, align_tw_price
+from src.core.market_rules import BENCHMARK_TICKERS, TW_SELL_TAX, TW_BROKER_FEE, TW_ODD_LOT_MAX, USD_TWD, align_tw_price
 from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT, hard_stop_hit
 
 
@@ -426,14 +426,21 @@ class AutoTrader:
         existing_positions = PortfolioTracker.load_portfolio()
         pos_map = {p["ticker"]: p for p in existing_positions}
         today_str = datetime.now(self.tw_tz).strftime("%Y-%m-%d")
+        cash = float(p_state.get("cash", 30000.0))
 
         for ord_item in orders:
             t = ord_item["ticker"]
             act = ord_item["action"]
+            # 現金以台幣記帳：賣出加回淨額 (扣手續費與台股證交稅)，買進扣除含手續費成本
+            gross = ord_item["shares"] * ord_item["price"]
+            fee = max(1.0, gross * TW_BROKER_FEE)
+            fx = 1.0 if ord_item.get("is_tw") else USD_TWD
             if act == "SELL":
                 if t in pos_map:
                     del pos_map[t]
+                    cash += (gross - fee - (gross * TW_SELL_TAX if ord_item.get("is_tw") else 0.0)) * fx
             elif act == "BUY":
+                cash -= (gross + fee) * fx
                 pos_map[t] = {
                     "ticker": t,
                     "shares": ord_item["shares"],
@@ -443,7 +450,7 @@ class AutoTrader:
                 }
 
         final_positions = list(pos_map.values())
-        PortfolioTracker.save_portfolio(final_positions, extra_state={"stop_log": p_state.get("stop_log", {})})
+        PortfolioTracker.save_portfolio(final_positions, extra_state={"stop_log": p_state.get("stop_log", {}), "cash": round(cash, 2)})
         return logs, final_positions
 
     @classmethod

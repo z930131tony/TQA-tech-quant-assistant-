@@ -9,6 +9,7 @@ BENCHMARK_TICKERS = ["0050.TW", "00935.TW", "00881.TW", "QQQ", "SMH"]
 TW_SELL_TAX = 0.003        # 台股賣出證交稅 0.3%
 TW_BROKER_FEE = 0.001425   # 台股券商手續費 0.1425% (未打折)
 TW_ODD_LOT_MAX = 999       # 盤中零股每筆上限 1~999 股
+USD_TWD = 32.5             # 帳戶以台幣計，美股部位與現金一律用此匯率換算
 
 
 def get_tw_tick_size(price: float) -> float:
