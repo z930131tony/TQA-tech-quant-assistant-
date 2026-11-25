@@ -26,6 +26,7 @@ from src.data.loader import TechDataLoader
 from src.strategy.features import TechFeatureEngine
 from src.execution.portfolio import PortfolioTracker
 from src.execution.trader import AutoTrader, SHIOAJI_AVAILABLE, sj
+from src.core.market_rules import USD_TWD
 
 try:
     from rich.console import Console
@@ -52,7 +53,7 @@ def print_rich_diagnostics(
     cash = state.get("cash", 30000.0)
     
     # 計算目前總持股市值與總淨值 (美股以匯率 32.5 換算為台幣)
-    total_market_val = sum((p.get("market_val", 0.0) if p.get("is_tw") else p.get("market_val", 0.0) * 32.5) for p in evaluated)
+    total_market_val = sum((p.get("market_val", 0.0) if p.get("is_tw") else p.get("market_val", 0.0) * USD_TWD) for p in evaluated)
     total_equity = total_market_val + cash
 
     if RICH_AVAILABLE:

@@ -17,6 +17,7 @@ import numpy as np
 from typing import Dict, Optional
 from src.config import TECH_UNIVERSE_TW, ROOT_DIR
 from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT
+from src.core.market_rules import USD_TWD
 from src.execution.portfolio import PortfolioTracker
 
 RESPONSIVE_HTML_TEMPLATE = """<!DOCTYPE html>
@@ -2294,8 +2295,17 @@ class WebDashboardGenerator:
 
         # 4. 個人持股風控監控 (Portfolio & Risk Tracker)
         portfolio_positions = PortfolioTracker.evaluate_portfolio(dataset)
-        tw_portfolio_html = cls.build_portfolio_html(portfolio_positions, "TW")
-        us_portfolio_html = cls.build_portfolio_html(portfolio_positions, "US")
+        # 模擬帳戶總覽 (台美合併、以台幣計)，台股與美股卡片都顯示同一行
+        acct = PortfolioTracker.load_portfolio_state()
+        acct_mv = sum(p["market_val"] * (1.0 if p["is_tw"] else USD_TWD) for p in portfolio_positions)
+        acct_cash = float(acct.get("cash", 0.0))
+        acct_html = (
+            f'<div class="data-date" style="color:#cbd5e1;">🏦 模擬帳戶 (台美合併、台幣計)：'
+            f'淨值 NT${acct_cash + acct_mv:,.0f} ｜ 現金 NT${acct_cash:,.0f} ｜ 持股市值 NT${acct_mv:,.0f} ｜ '
+            f'歷史最高 NT${float(acct.get("peak_equity", 0.0)):,.0f} ｜ 回撤 {float(acct.get("current_drawdown_pct", 0.0)):.2f}%</div>'
+        )
+        tw_portfolio_html = acct_html + cls.build_portfolio_html(portfolio_positions, "TW")
+        us_portfolio_html = acct_html + cls.build_portfolio_html(portfolio_positions, "US")
 
         # 4.5 AI 多空對決戰情卡片 (TradingAgents)
         if ai_debate_data is None:

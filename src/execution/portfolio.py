@@ -18,6 +18,7 @@ import numpy as np
 import pytz
 from src.config import TECH_UNIVERSE_TW, config, ROOT_DIR
 from src.core.risk_engine import TRAILING_STOP_PCT, HARD_STOP_PCT, hard_stop_hit, trailing_stop_hit
+from src.core.market_rules import USD_TWD
 
 PORTFOLIO_FILE = os.path.join(ROOT_DIR, "portfolio.json")
 
@@ -275,7 +276,7 @@ class PortfolioTracker:
             cost_val = shares * cost_price
             unrealized_pnl = market_val - cost_val
             return_pct = ((curr_price - cost_price) / cost_price * 100.0) if cost_price > 0 else 0.0
-            market_val_twd = market_val if is_tw else (market_val * 32.5)
+            market_val_twd = market_val if is_tw else (market_val * USD_TWD)
             total_market_value += market_val_twd
 
             # ----------------------------------------------------
